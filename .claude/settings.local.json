@@ -10,7 +10,8 @@
       "Bash(printf 'n\\\\nn\\\\n')",
       "Bash(npx create-next-app@latest . --typescript --tailwind --app --eslint --no-import-alias --use-npm --turbopack)",
       "Bash(npx next:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "WebFetch(domain:the-odds-api.com)"
     ]
   }
 }

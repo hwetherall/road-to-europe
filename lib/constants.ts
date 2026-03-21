@@ -74,3 +74,33 @@ export const TEAM_NAME_MAP: Record<string, string> = {
   'Burnley FC': 'BUR',
   'Wolverhampton Wanderers FC': 'WOL',
 };
+
+// the-odds-api.com uses shorter team names — map those to abbreviations too
+export const ODDS_API_NAME_MAP: Record<string, string> = {
+  'Arsenal': 'ARS',
+  'Manchester City': 'MCI',
+  'Manchester United': 'MUN',
+  'Aston Villa': 'AVL',
+  'Chelsea': 'CFC',
+  'Liverpool': 'LFC',
+  'Brentford': 'BRE',
+  'Fulham': 'FUL',
+  'Everton': 'EVE',
+  'Brighton and Hove Albion': 'BRI',
+  'Brighton': 'BRI',
+  'Newcastle United': 'NEW',
+  'Bournemouth': 'BOU',
+  'AFC Bournemouth': 'BOU',
+  'Sunderland': 'SUN',
+  'Crystal Palace': 'CRY',
+  'Leeds United': 'LEE',
+  'Leeds': 'LEE',
+  'Tottenham Hotspur': 'TOT',
+  'Tottenham': 'TOT',
+  'Nottingham Forest': 'NFO',
+  'West Ham United': 'WHU',
+  'West Ham': 'WHU',
+  'Burnley': 'BUR',
+  'Wolverhampton Wanderers': 'WOL',
+  'Wolves': 'WOL',
+};

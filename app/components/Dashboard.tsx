@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Team, Fixture, SimulationResult, SensitivityResult, TeamContext } from '@/lib/types';
-import { HARDCODED_STANDINGS, KNOWN_FIXTURES } from '@/lib/constants';
+import { HARDCODED_STANDINGS, KNOWN_FIXTURES, ODDS_API_NAME_MAP } from '@/lib/constants';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { simulate } from '@/lib/montecarlo';
 import { sensitivityScan } from '@/lib/sensitivity';
 import { getTeamContext } from '@/lib/team-context';
 import { getTeamColour, getTeamTextColour } from '@/lib/team-colours';
+import { teamElo, eloProb } from '@/lib/elo';
 import TeamSelector from './TeamSelector';
 import QualificationCards from './QualificationCards';
 import PositionHistogram from './PositionHistogram';
@@ -79,24 +80,81 @@ export default function Dashboard() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [standingsRes, fixturesRes] = await Promise.all([
+      const [standingsRes, fixturesRes, oddsRes] = await Promise.all([
         fetch('/api/standings'),
         fetch('/api/fixtures'),
+        fetch('/api/odds'),
       ]);
+
+      let nextTeams = teams;
 
       if (standingsRes.ok) {
         const standingsData = await standingsRes.json();
         if (standingsData.teams?.length > 0) {
-          setTeams(standingsData.teams);
+          nextTeams = standingsData.teams;
+          setTeams(nextTeams);
           setDataSource(standingsData.source);
+        }
+      }
+
+      // Parse live odds into a lookup by "homeAbbr-awayAbbr"
+      type OddsEntry = { homeTeam: string; awayTeam: string; date: string; homeWin: number; draw: number; awayWin: number };
+      const oddsLookup = new Map<string, OddsEntry>();
+      if (oddsRes.ok) {
+        const oddsData = await oddsRes.json();
+        if (oddsData.odds?.length > 0) {
+          for (const o of oddsData.odds as OddsEntry[]) {
+            const homeAbbr = ODDS_API_NAME_MAP[o.homeTeam];
+            const awayAbbr = ODDS_API_NAME_MAP[o.awayTeam];
+            if (homeAbbr && awayAbbr) {
+              oddsLookup.set(`${homeAbbr}-${awayAbbr}`, o);
+            }
+          }
         }
       }
 
       if (fixturesRes.ok) {
         const fixturesData = await fixturesRes.json();
         if (fixturesData.fixtures?.length > 0) {
-          const known = fixturesData.fixtures;
-          const generated = generateRemainingFixtures(teams, known);
+          const known = fixturesData.fixtures.map((fixture: Fixture) => {
+            // Try to match with live odds first
+            const oddsKey = `${fixture.homeTeam}-${fixture.awayTeam}`;
+            const liveOdds = oddsLookup.get(oddsKey);
+            if (liveOdds && liveOdds.homeWin > 0) {
+              return {
+                ...fixture,
+                homeWinProb: liveOdds.homeWin,
+                drawProb: liveOdds.draw,
+                awayWinProb: liveOdds.awayWin,
+                probSource: 'odds_api' as const,
+              };
+            }
+
+            // If fixture already has probabilities (e.g. from hardcoded data), keep them
+            if (
+              fixture.homeWinProb !== undefined &&
+              fixture.drawProb !== undefined &&
+              fixture.awayWinProb !== undefined
+            ) {
+              return fixture;
+            }
+
+            // Fall back to Elo estimation
+            const homeTeam = nextTeams.find((t) => t.abbr === fixture.homeTeam);
+            const awayTeam = nextTeams.find((t) => t.abbr === fixture.awayTeam);
+            if (!homeTeam || !awayTeam) return fixture;
+
+            const probs = eloProb(teamElo(homeTeam), teamElo(awayTeam));
+            return {
+              ...fixture,
+              homeWinProb: probs.homeWin,
+              drawProb: probs.draw,
+              awayWinProb: probs.awayWin,
+              probSource: 'elo_estimated' as const,
+            };
+          });
+
+          const generated = generateRemainingFixtures(nextTeams, known);
           setFixtures([...known, ...generated]);
         }
       }

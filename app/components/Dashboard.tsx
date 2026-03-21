@@ -1,7 +1,14 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Team, Fixture, SimulationResult, SensitivityResult, TeamContext } from '@/lib/types';
+import {
+  Team,
+  Fixture,
+  SimulationResult,
+  SensitivityResult,
+  SensitivityMetric,
+  TeamContext,
+} from '@/lib/types';
 import { HARDCODED_STANDINGS, KNOWN_FIXTURES, ODDS_API_NAME_MAP } from '@/lib/constants';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { simulate } from '@/lib/montecarlo';
@@ -22,19 +29,24 @@ import RefreshButton from './RefreshButton';
 
 const SIM_COUNT = 10000;
 const SENSITIVITY_SIMS = 1000;
+const SENSITIVITY_METRIC_LABELS: Record<SensitivityMetric, string> = {
+  championPct: 'title odds',
+  top4Pct: 'top-4 odds',
+  top5Pct: 'top-5 odds',
+  top6Pct: 'top-6 odds',
+  top7Pct: 'European odds',
+  relegationPct: 'relegation risk',
+  survivalPct: 'survival odds',
+};
 
-function getInitialTeam(): string {
-  if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('team') ?? 'NEW';
-  }
-  return 'NEW';
+interface DashboardProps {
+  initialTeam?: string;
 }
 
-export default function Dashboard() {
+export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const [teams, setTeams] = useState<Team[]>(HARDCODED_STANDINGS);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<string>(getInitialTeam);
+  const [selectedTeam, setSelectedTeam] = useState<string>(initialTeam);
   const [simResults, setSimResults] = useState<SimulationResult[] | null>(null);
   const [sensitivityResults, setSensitivityResults] = useState<SensitivityResult[] | null>(null);
   const [running, setRunning] = useState(false);
@@ -66,6 +78,12 @@ export default function Dashboard() {
     const result = whatIfSimResult ?? teamResult ?? undefined;
     return getTeamContext(team, teams, result);
   }, [teams, selectedTeam, teamResult, whatIfSimResult]);
+
+  const sensitivityMetric: SensitivityMetric = useMemo(
+    () => teamContext?.primaryMetric ?? 'top7Pct',
+    [teamContext]
+  );
+  const sensitivityMetricLabel = SENSITIVITY_METRIC_LABELS[sensitivityMetric];
 
   const accentColor = getTeamColour(selectedTeam);
   const textColor = getTeamTextColour(selectedTeam);
@@ -185,14 +203,15 @@ export default function Dashboard() {
           teams,
           allFixtures,
           selectedTeam,
-          SENSITIVITY_SIMS
+          SENSITIVITY_SIMS,
+          sensitivityMetric
         );
         setSensitivityResults(sensitivity);
         setRunning(false);
         setPhase('');
       }, 50);
     }, 50);
-  }, [teams, allFixtures, selectedTeam]);
+  }, [teams, allFixtures, selectedTeam, sensitivityMetric]);
 
   // What-if re-simulation (debounced)
   const runWhatIfSim = useCallback(() => {
@@ -247,13 +266,18 @@ export default function Dashboard() {
           const results = simulate(HARDCODED_STANDINGS, initFixtures, SIM_COUNT);
           setSimResults(results);
 
-          const initTeam = getInitialTeam();
-          const baseResult = results.find((r) => r.team === initTeam) ?? null;
+          const baseResult = results.find((r) => r.team === initialTeam) ?? null;
           setBaseSimResult(baseResult);
 
           setPhase('Running sensitivity analysis...');
           setTimeout(() => {
-            const sensitivity = sensitivityScan(HARDCODED_STANDINGS, initFixtures, initTeam, SENSITIVITY_SIMS);
+            const sensitivity = sensitivityScan(
+              HARDCODED_STANDINGS,
+              initFixtures,
+              initialTeam,
+              SENSITIVITY_SIMS,
+              sensitivityMetric
+            );
             setSensitivityResults(sensitivity);
             setRunning(false);
             setPhase('');
@@ -279,7 +303,8 @@ export default function Dashboard() {
         teams,
         allFixtures,
         selectedTeam,
-        SENSITIVITY_SIMS
+        SENSITIVITY_SIMS,
+        sensitivityMetric
       );
       setSensitivityResults(sensitivity);
       setPhase('');
@@ -290,7 +315,7 @@ export default function Dashboard() {
       }
     }, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTeam]);
+  }, [selectedTeam, sensitivityMetric]);
 
   const handleToggleLock = useCallback((fixtureId: string, result: 'home' | 'draw' | 'away') => {
     setLocks((prev) => {
@@ -486,7 +511,12 @@ export default function Dashboard() {
 
         {/* Sensitivity Chart */}
         {sensitivityResults && sensitivityResults.length > 0 && (
-          <SensitivityChart results={sensitivityResults} selectedTeam={selectedTeam} teams={teams} />
+          <SensitivityChart
+            results={sensitivityResults}
+            selectedTeam={selectedTeam}
+            teams={teams}
+            metricLabel={sensitivityMetricLabel}
+          />
         )}
 
         {/* League Projections */}

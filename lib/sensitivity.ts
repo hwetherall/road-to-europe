@@ -1,4 +1,4 @@
-import { Team, Fixture, SensitivityResult } from './types';
+import { Team, Fixture, SensitivityMetric, SensitivityResult, SimulationResult } from './types';
 import { simulate } from './montecarlo';
 
 function lockFixture(
@@ -21,11 +21,15 @@ export function sensitivityScan(
   teams: Team[],
   fixtures: Fixture[],
   targetTeam: string,
-  simsPerLock: number = 1000
+  simsPerLock: number = 1000,
+  metric: SensitivityMetric = 'top7Pct'
 ): SensitivityResult[] {
   const scheduledFixtures = fixtures.filter((f) => f.status === 'SCHEDULED');
   const baseline = simulate(teams, fixtures, simsPerLock);
-  const baselineTop7 = baseline.find((r) => r.team === targetTeam)?.top7Pct ?? 0;
+  const baselineValue = getMetricValue(
+    baseline.find((r) => r.team === targetTeam),
+    metric
+  );
 
   const results: SensitivityResult[] = [];
 
@@ -36,7 +40,8 @@ export function sensitivityScan(
       simsPerLock
     );
     const deltaHome =
-      (homeWinResult.find((r) => r.team === targetTeam)?.top7Pct ?? 0) - baselineTop7;
+      getMetricValue(homeWinResult.find((r) => r.team === targetTeam), metric) -
+      baselineValue;
 
     const awayWinResult = simulate(
       teams,
@@ -44,7 +49,8 @@ export function sensitivityScan(
       simsPerLock
     );
     const deltaAway =
-      (awayWinResult.find((r) => r.team === targetTeam)?.top7Pct ?? 0) - baselineTop7;
+      getMetricValue(awayWinResult.find((r) => r.team === targetTeam), metric) -
+      baselineValue;
 
     const drawResult = simulate(
       teams,
@@ -52,7 +58,8 @@ export function sensitivityScan(
       simsPerLock
     );
     const deltaDraw =
-      (drawResult.find((r) => r.team === targetTeam)?.top7Pct ?? 0) - baselineTop7;
+      getMetricValue(drawResult.find((r) => r.team === targetTeam), metric) -
+      baselineValue;
 
     results.push({
       fixtureId: fixture.id,
@@ -70,4 +77,12 @@ export function sensitivityScan(
   }
 
   return results.sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
+}
+
+function getMetricValue(
+  result: SimulationResult | undefined,
+  metric: SensitivityMetric
+): number {
+  if (!result) return 0;
+  return result[metric];
 }

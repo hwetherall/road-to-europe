@@ -6,13 +6,19 @@ interface Props {
   results: SensitivityResult[];
   selectedTeam: string;
   teams: Team[];
+  metricLabel: string;
 }
 
 function getTeamName(abbr: string, teams: Team[]): string {
   return teams.find((t) => t.abbr === abbr)?.name ?? abbr;
 }
 
-export default function SensitivityChart({ results, selectedTeam, teams }: Props) {
+export default function SensitivityChart({
+  results,
+  selectedTeam,
+  teams,
+  metricLabel,
+}: Props) {
   const top10 = results.slice(0, 10);
   const maxDelta = Math.max(...top10.map((r) => r.maxAbsDelta), 1);
   const teamName = getTeamName(selectedTeam, teams);
@@ -23,8 +29,8 @@ export default function SensitivityChart({ results, selectedTeam, teams }: Props
         High-Leverage Fixtures
       </h2>
       <p className="text-xs text-white/30 mb-4">
-        Fixtures with the biggest impact on {teamName}&apos;s odds. Green = good
-        for {teamName}, red = bad.
+        Fixtures with the biggest impact on {teamName}&apos;s {metricLabel}. Green
+        = good for {teamName}, red = bad.
       </p>
       <div className="space-y-2">
         {top10.map((r) => {

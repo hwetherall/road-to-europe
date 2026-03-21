@@ -51,6 +51,15 @@ export interface SensitivityResult {
   maxAbsDelta: number;
 }
 
+export type SensitivityMetric =
+  | 'championPct'
+  | 'top4Pct'
+  | 'top5Pct'
+  | 'top6Pct'
+  | 'top7Pct'
+  | 'relegationPct'
+  | 'survivalPct';
+
 export interface CardConfig {
   key: keyof SimulationResult;
   label: string;
@@ -62,7 +71,7 @@ export interface CardConfig {
 export interface TeamContext {
   team: string;
   zone: 'title' | 'europe' | 'midtable' | 'relegation';
-  primaryMetric: string;
+  primaryMetric: SensitivityMetric;
   relevantCards: CardConfig[];
   accentColor: string;
 }

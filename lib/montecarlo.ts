@@ -110,6 +110,8 @@ export function simulate(
     top6Pct: positionCounts[i].slice(0, 6).reduce((a, b) => a + b, 0) / numSims * 100,
     top7Pct: positionCounts[i].slice(0, 7).reduce((a, b) => a + b, 0) / numSims * 100,
     relegationPct: positionCounts[i].slice(-3).reduce((a, b) => a + b, 0) / numSims * 100,
+    championPct: positionCounts[i][0] / numSims * 100,
+    survivalPct: (1 - positionCounts[i].slice(-3).reduce((a, b) => a + b, 0) / numSims) * 100,
     avgPoints: totalPoints[i] / numSims,
     avgPosition: totalPositions[i] / numSims,
   }));

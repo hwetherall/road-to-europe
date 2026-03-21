@@ -1,35 +1,39 @@
 'use client';
 
-import { Fixture } from '@/lib/types';
-import { HARDCODED_STANDINGS } from '@/lib/constants';
+import { Fixture, Team } from '@/lib/types';
 
 interface Props {
   fixtures: Fixture[];
+  selectedTeam: string;
+  teams: Team[];
+  accentColor: string;
 }
 
-function getTeamName(abbr: string): string {
-  return HARDCODED_STANDINGS.find((t) => t.abbr === abbr)?.name ?? abbr;
+function getTeamName(abbr: string, teams: Team[]): string {
+  return teams.find((t) => t.abbr === abbr)?.name ?? abbr;
 }
 
-export default function FixtureList({ fixtures }: Props) {
-  const newcastleFixtures = fixtures.filter(
-    (f) => f.homeTeam === 'NEW' || f.awayTeam === 'NEW'
+export default function FixtureList({ fixtures, selectedTeam, teams, accentColor }: Props) {
+  const teamFixtures = fixtures.filter(
+    (f) => f.homeTeam === selectedTeam || f.awayTeam === selectedTeam
   );
 
-  if (newcastleFixtures.length === 0) return null;
+  if (teamFixtures.length === 0) return null;
+
+  const teamName = getTeamName(selectedTeam, teams);
 
   return (
     <div className="mb-8">
       <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-4">
-        Newcastle Remaining Fixtures
+        {teamName} Remaining Fixtures
       </h2>
       <div className="flex flex-col gap-1.5">
-        {newcastleFixtures.map((f) => {
-          const isHome = f.homeTeam === 'NEW';
+        {teamFixtures.map((f) => {
+          const isHome = f.homeTeam === selectedTeam;
           const opp = isHome ? f.awayTeam : f.homeTeam;
           const winProb = isHome ? (f.homeWinProb ?? 0.4) : (f.awayWinProb ?? 0.3);
           const probColor =
-            winProb > 0.5 ? '#00ddbb' : winProb > 0.35 ? '#ffaa00' : '#ff6644';
+            winProb > 0.5 ? accentColor : winProb > 0.35 ? '#ffaa00' : '#ff6644';
 
           return (
             <div
@@ -38,16 +42,17 @@ export default function FixtureList({ fixtures }: Props) {
             >
               <div className="flex items-center gap-3 min-w-[180px]">
                 <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-wider ${
+                  className="text-[10px] font-bold px-2 py-0.5 rounded tracking-wider"
+                  style={
                     isHome
-                      ? 'bg-teal-500/15 text-teal-400'
-                      : 'bg-white/[0.06] text-white/40'
-                  }`}
+                      ? { background: `${accentColor}22`, color: accentColor }
+                      : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.4)' }
+                  }
                 >
                   {isHome ? 'HOME' : 'AWAY'}
                 </span>
                 <span className="font-medium text-sm">
-                  vs {getTeamName(opp)}
+                  vs {getTeamName(opp, teams)}
                 </span>
               </div>
               <div className="flex items-center gap-4">

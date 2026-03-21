@@ -4,6 +4,8 @@ import { Team } from '@/lib/types';
 
 interface Props {
   teams: Team[];
+  selectedTeam: string;
+  accentColor: string;
 }
 
 const ZONE_COLORS: Record<string, string> = {
@@ -23,7 +25,7 @@ function getZone(position: number): string | null {
   return null;
 }
 
-export default function StandingsTable({ teams }: Props) {
+export default function StandingsTable({ teams, selectedTeam, accentColor }: Props) {
   const sorted = [...teams].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     if (b.goalDifference !== a.goalDifference)
@@ -55,29 +57,35 @@ export default function StandingsTable({ teams }: Props) {
             </thead>
             <tbody>
               {sorted.map((t, i) => {
-                const isNew = t.abbr === 'NEW';
+                const isSelected = t.abbr === selectedTeam;
                 const zone = getZone(i);
                 return (
                   <tr
                     key={t.abbr}
                     className={`border-b border-white/[0.04] ${
-                      isNew
-                        ? 'bg-teal-500/[0.08]'
+                      isSelected
+                        ? ''
                         : zone
                         ? ZONE_COLORS[zone]
                         : ''
                     }`}
-                    style={isNew ? { borderLeft: '3px solid #00aaaa' } : undefined}
+                    style={
+                      isSelected
+                        ? {
+                            borderLeft: `3px solid ${accentColor}`,
+                            background: `${accentColor}11`,
+                          }
+                        : undefined
+                    }
                   >
                     <td className="px-3 py-2.5 text-center text-white/35 text-xs">
                       {i + 1}
                     </td>
                     <td
                       className={`px-3 py-2.5 ${
-                        isNew
-                          ? 'font-bold text-teal-400'
-                          : 'text-white/85'
+                        isSelected ? 'font-bold' : 'text-white/85'
                       }`}
+                      style={isSelected ? { color: accentColor } : undefined}
                     >
                       {t.name}
                     </td>

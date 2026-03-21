@@ -14,9 +14,9 @@ const oswald = Oswald({
 });
 
 export const metadata: Metadata = {
-  title: 'Newcastle European Qualification Simulator',
+  title: 'Keepwatch — EPL Season Simulator',
   description:
-    'Monte Carlo simulation of EPL season outcomes with sensitivity analysis for Newcastle United European qualification odds.',
+    'Monte Carlo simulation of EPL season outcomes with sensitivity analysis for any Premier League team.',
 };
 
 export default function RootLayout({
@@ -25,7 +25,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${oswald.variable} dark`}>
+    <html
+      lang="en"
+      className={`${inter.variable} ${oswald.variable} dark`}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-[#0a0a0a] text-white antialiased">
         {children}
       </body>

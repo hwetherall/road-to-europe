@@ -1,19 +1,21 @@
 'use client';
 
-import { SensitivityResult } from '@/lib/types';
-import { HARDCODED_STANDINGS } from '@/lib/constants';
+import { SensitivityResult, Team } from '@/lib/types';
 
 interface Props {
   results: SensitivityResult[];
+  selectedTeam: string;
+  teams: Team[];
 }
 
-function getTeamName(abbr: string): string {
-  return HARDCODED_STANDINGS.find((t) => t.abbr === abbr)?.name ?? abbr;
+function getTeamName(abbr: string, teams: Team[]): string {
+  return teams.find((t) => t.abbr === abbr)?.name ?? abbr;
 }
 
-export default function SensitivityChart({ results }: Props) {
+export default function SensitivityChart({ results, selectedTeam, teams }: Props) {
   const top10 = results.slice(0, 10);
   const maxDelta = Math.max(...top10.map((r) => r.maxAbsDelta), 1);
+  const teamName = getTeamName(selectedTeam, teams);
 
   return (
     <div className="mb-8">
@@ -21,19 +23,17 @@ export default function SensitivityChart({ results }: Props) {
         High-Leverage Fixtures
       </h2>
       <p className="text-xs text-white/30 mb-4">
-        Fixtures with the biggest impact on Newcastle&apos;s European odds. Green = good
-        for Newcastle, red = bad.
+        Fixtures with the biggest impact on {teamName}&apos;s odds. Green = good
+        for {teamName}, red = bad.
       </p>
       <div className="space-y-2">
         {top10.map((r) => {
-          // Find the most impactful result direction
           const deltas = [
-            { label: `${getTeamName(r.homeTeam)} win`, value: r.deltaIfHomeWin },
+            { label: `${getTeamName(r.homeTeam, teams)} win`, value: r.deltaIfHomeWin },
             { label: 'Draw', value: r.deltaIfDraw },
-            { label: `${getTeamName(r.awayTeam)} win`, value: r.deltaIfAwayWin },
+            { label: `${getTeamName(r.awayTeam, teams)} win`, value: r.deltaIfAwayWin },
           ];
 
-          // Sort by absolute delta descending
           deltas.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
           return (
@@ -43,9 +43,9 @@ export default function SensitivityChart({ results }: Props) {
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">
-                  {getTeamName(r.homeTeam)}{' '}
+                  {getTeamName(r.homeTeam, teams)}{' '}
                   <span className="text-white/30">vs</span>{' '}
-                  {getTeamName(r.awayTeam)}
+                  {getTeamName(r.awayTeam, teams)}
                 </span>
                 <span className="text-xs text-white/40">
                   Max impact: {r.maxAbsDelta.toFixed(1)}pp

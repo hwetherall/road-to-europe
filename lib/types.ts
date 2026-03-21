@@ -35,6 +35,8 @@ export interface SimulationResult {
   top6Pct: number;
   top7Pct: number;
   relegationPct: number;
+  championPct: number;
+  survivalPct: number;
   avgPoints: number;
   avgPosition: number;
 }
@@ -47,4 +49,26 @@ export interface SensitivityResult {
   deltaIfAwayWin: number;
   deltaIfDraw: number;
   maxAbsDelta: number;
+}
+
+export interface CardConfig {
+  key: keyof SimulationResult;
+  label: string;
+  sub: string;
+  color: string;
+  invert?: boolean;
+}
+
+export interface TeamContext {
+  team: string;
+  zone: 'title' | 'europe' | 'midtable' | 'relegation';
+  primaryMetric: string;
+  relevantCards: CardConfig[];
+  accentColor: string;
+}
+
+export interface WhatIfState {
+  locks: Record<string, 'home' | 'draw' | 'away'>;
+  baseResult: SimulationResult | null;
+  whatIfResult: SimulationResult | null;
 }

@@ -16,7 +16,7 @@ export default function RefreshButton({
   simCount,
 }: Props) {
   return (
-    <div className="flex items-center gap-4 mb-7">
+    <>
       <button
         onClick={onRefresh}
         disabled={running}
@@ -33,9 +33,8 @@ export default function RefreshButton({
           : '\u25B6 Run Simulation'}
       </button>
       <div className="text-xs text-white/35">
-        {simCount.toLocaleString()} Monte Carlo simulations &times;{' '}
-        {fixtureCount} remaining fixtures
+        {simCount.toLocaleString()} sims &times; {fixtureCount} fixtures
       </div>
-    </div>
+    </>
   );
 }

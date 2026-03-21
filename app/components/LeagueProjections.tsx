@@ -1,22 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { SimulationResult } from '@/lib/types';
-import { HARDCODED_STANDINGS } from '@/lib/constants';
+import { SimulationResult, Team } from '@/lib/types';
 
 interface Props {
   results: SimulationResult[];
+  selectedTeam: string;
+  accentColor: string;
+  teams: Team[];
 }
 
-function getTeamName(abbr: string): string {
-  return HARDCODED_STANDINGS.find((t) => t.abbr === abbr)?.name ?? abbr;
+function getTeamName(abbr: string, teams: Team[]): string {
+  return teams.find((t) => t.abbr === abbr)?.name ?? abbr;
 }
 
-function getTeamPoints(abbr: string): number {
-  return HARDCODED_STANDINGS.find((t) => t.abbr === abbr)?.points ?? 0;
+function getTeamPoints(abbr: string, teams: Team[]): number {
+  return teams.find((t) => t.abbr === abbr)?.points ?? 0;
 }
 
-export default function LeagueProjections({ results }: Props) {
+export default function LeagueProjections({ results, selectedTeam, accentColor, teams }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const sorted = [...results].sort((a, b) => a.avgPosition - b.avgPosition);
@@ -41,9 +43,8 @@ export default function LeagueProjections({ results }: Props) {
                     'Team',
                     'Pts',
                     'Avg Pts',
+                    'Champ',
                     'Top 4',
-                    'Top 5',
-                    'Top 6',
                     'Top 7',
                     'Releg.',
                   ].map((h) => (
@@ -60,45 +61,58 @@ export default function LeagueProjections({ results }: Props) {
               </thead>
               <tbody>
                 {sorted.map((r, i) => {
-                  const isNew = r.team === 'NEW';
+                  const isSelected = r.team === selectedTeam;
                   return (
                     <tr
                       key={r.team}
-                      className={`border-b border-white/[0.04] ${
-                        isNew ? 'bg-teal-500/[0.08]' : ''
-                      }`}
+                      className={`border-b border-white/[0.04]`}
+                      style={
+                        isSelected
+                          ? { background: `${accentColor}11` }
+                          : undefined
+                      }
                     >
                       <td className="px-2.5 py-2.5 text-center text-white/35 text-xs">
                         {i + 1}
                       </td>
                       <td
                         className={`px-2.5 py-2.5 ${
-                          isNew
-                            ? 'font-bold text-teal-400'
-                            : 'text-white/80'
+                          isSelected ? 'font-bold' : 'text-white/80'
                         }`}
+                        style={isSelected ? { color: accentColor } : undefined}
                       >
-                        {getTeamName(r.team)}
+                        {getTeamName(r.team, teams)}
                       </td>
                       <td className="px-2.5 py-2.5 text-center font-semibold">
-                        {getTeamPoints(r.team)}
+                        {getTeamPoints(r.team, teams)}
                       </td>
                       <td className="px-2.5 py-2.5 text-center text-white/50">
                         {r.avgPoints.toFixed(1)}
                       </td>
-                      {[r.top4Pct, r.top5Pct, r.top6Pct, r.top7Pct].map(
-                        (v, j) => (
-                          <td
-                            key={j}
-                            className="px-2.5 py-2.5 text-center"
-                            style={{
-                              color: v > 50 ? '#00ddbb' : 'rgba(255,255,255,0.5)',
-                            }}
-                          >
-                            {v.toFixed(1)}%
-                          </td>
-                        )
-                      )}
+                      <td
+                        className="px-2.5 py-2.5 text-center"
+                        style={{
+                          color: r.championPct > 10 ? '#FFD700' : 'rgba(255,255,255,0.35)',
+                        }}
+                      >
+                        {r.championPct.toFixed(1)}%
+                      </td>
+                      <td
+                        className="px-2.5 py-2.5 text-center"
+                        style={{
+                          color: r.top4Pct > 50 ? '#22c55e' : 'rgba(255,255,255,0.5)',
+                        }}
+                      >
+                        {r.top4Pct.toFixed(1)}%
+                      </td>
+                      <td
+                        className="px-2.5 py-2.5 text-center"
+                        style={{
+                          color: r.top7Pct > 50 ? '#00ddbb' : 'rgba(255,255,255,0.5)',
+                        }}
+                      >
+                        {r.top7Pct.toFixed(1)}%
+                      </td>
                       <td
                         className="px-2.5 py-2.5 text-center"
                         style={{

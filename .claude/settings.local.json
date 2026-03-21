@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --src-dir=false --eslint --no-import-alias --use-npm)",
+      "Bash(mkdir -p backup)",
+      "Bash(mv newcastle-sim.jsx backup/)",
+      "Bash(mv README.md backup/)",
+      "Bash(cd:*)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --src-dir=false --eslint --no-import-alias --use-npm --turbopack)",
+      "Bash(printf 'n\\\\nn\\\\n')",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --eslint --no-import-alias --use-npm --turbopack)",
+      "Bash(npx next:*)"
+    ]
+  }
+}

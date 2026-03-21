@@ -2,7 +2,12 @@ import { Team, Fixture } from './types';
 import { teamElo, eloProb } from './elo';
 
 export function generateRemainingFixtures(teams: Team[], knownFixtures: Fixture[]): Fixture[] {
-  const knownSet = new Set(knownFixtures.map((f) => `${f.homeTeam}-${f.awayTeam}`));
+  // Track both home-away AND away-home directions so we don't regenerate
+  // a fixture that's already known regardless of which side was home
+  const knownSet = new Set<string>();
+  for (const f of knownFixtures) {
+    knownSet.add(`${f.homeTeam}-${f.awayTeam}`);
+  }
 
   const gamesNeeded: Record<string, number> = {};
   teams.forEach((t) => {

@@ -117,6 +117,9 @@ export default function Dashboard() {
         const fixturesData = await fixturesRes.json();
         if (fixturesData.fixtures?.length > 0) {
           const known = fixturesData.fixtures.map((fixture: Fixture) => {
+            // Finished fixtures don't need probabilities — keep as-is
+            if (fixture.status === 'FINISHED') return fixture;
+
             // Try to match with live odds first
             const oddsKey = `${fixture.homeTeam}-${fixture.awayTeam}`;
             const liveOdds = oddsLookup.get(oddsKey);

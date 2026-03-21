@@ -28,6 +28,8 @@ export default function SensitivityChart({ results, selectedTeam, teams }: Props
       </p>
       <div className="space-y-2">
         {top10.map((r) => {
+          const includesSelectedTeam =
+            r.homeTeam === selectedTeam || r.awayTeam === selectedTeam;
           const deltas = [
             { label: `${getTeamName(r.homeTeam, teams)} win`, value: r.deltaIfHomeWin },
             { label: 'Draw', value: r.deltaIfDraw },
@@ -39,7 +41,11 @@ export default function SensitivityChart({ results, selectedTeam, teams }: Props
           return (
             <div
               key={r.fixtureId}
-              className="bg-white/[0.03] border border-white/[0.06] rounded-lg p-3"
+              className={`border rounded-lg p-3 ${
+                includesSelectedTeam
+                  ? 'bg-white/[0.03] border-white/[0.06]'
+                  : 'bg-cyan-500/[0.08] border-cyan-400/20'
+              }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">

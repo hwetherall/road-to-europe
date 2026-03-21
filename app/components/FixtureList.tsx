@@ -15,7 +15,7 @@ function getTeamName(abbr: string, teams: Team[]): string {
 
 export default function FixtureList({ fixtures, selectedTeam, teams, accentColor }: Props) {
   const teamFixtures = fixtures.filter(
-    (f) => f.homeTeam === selectedTeam || f.awayTeam === selectedTeam
+    (f) => f.status === 'SCHEDULED' && (f.homeTeam === selectedTeam || f.awayTeam === selectedTeam)
   );
 
   if (teamFixtures.length === 0) return null;

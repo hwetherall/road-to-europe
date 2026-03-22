@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { ChatMessage, ScenarioModification } from '@/lib/chat-types';
+import { ChatMessage, ScenarioModification, ProposedOption } from '@/lib/chat-types';
 
 function escapeHtml(text: string): string {
   return text
@@ -28,6 +28,7 @@ interface Props {
   messages: ChatMessage[];
   accentColor: string;
   onApplyModification: (modification: ScenarioModification, messageId: string) => void;
+  onApplyOption: (option: ProposedOption, messageId: string) => void;
   appliedMessageIds: Set<string>;
 }
 
@@ -76,6 +77,60 @@ function ModificationCard({
   );
 }
 
+function OptionCard({
+  option,
+  index,
+  onApply,
+  applied,
+}: {
+  option: ProposedOption;
+  index: number;
+  onApply: () => void;
+  applied: boolean;
+}) {
+  const label = String.fromCharCode(65 + index); // A, B, C...
+  return (
+    <div className="mt-2 rounded-lg border border-white/[0.10] bg-white/[0.03] p-3">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="w-5 h-5 rounded-full bg-white/[0.08] text-[10px] font-bold flex items-center justify-center text-white/60">
+          {label}
+        </span>
+        <span className="text-[11px] text-white/70 font-semibold">{option.title}</span>
+        {option.confidence && (
+          <span className={`text-[9px] tracking-wider uppercase ${
+            option.confidence === 'high' ? 'text-green-400/60' : option.confidence === 'medium' ? 'text-amber-400/60' : 'text-red-400/60'
+          }`}>
+            {option.confidence}
+          </span>
+        )}
+      </div>
+      {option.modification?.teamModifications.map((tm, i) => (
+        <div key={i} className="text-[11px] text-white/50 mb-1">
+          <span className="font-semibold text-white/70">{tm.team}</span>:{' '}
+          home {tm.homeWinDelta > 0 ? '+' : ''}{(tm.homeWinDelta * 100).toFixed(0)}pp,{' '}
+          draw {tm.drawDelta > 0 ? '+' : ''}{(tm.drawDelta * 100).toFixed(0)}pp,{' '}
+          away {tm.awayWinDelta > 0 ? '+' : ''}{(tm.awayWinDelta * 100).toFixed(0)}pp
+        </div>
+      ))}
+      {option.fixtureLock && (
+        <div className="text-[11px] text-white/50">
+          Lock: {option.fixtureLock.fixtureId} &rarr; {option.fixtureLock.result}
+        </div>
+      )}
+      {applied ? (
+        <div className="mt-2 text-[11px] text-green-400/70">Applied</div>
+      ) : (
+        <button
+          onClick={onApply}
+          className="mt-2 px-3 py-1.5 rounded text-[11px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors cursor-pointer"
+        >
+          Apply
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ToolCallDisplay({ toolCall }: { toolCall: { query: string; status: string } }) {
   return (
     <div className="flex items-center gap-1.5 text-[11px] text-white/30 mt-1">
@@ -91,7 +146,7 @@ function ToolCallDisplay({ toolCall }: { toolCall: { query: string; status: stri
   );
 }
 
-export default function ChatThread({ messages, accentColor, onApplyModification, appliedMessageIds }: Props) {
+export default function ChatThread({ messages, accentColor, onApplyModification, onApplyOption, appliedMessageIds }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,12 +210,26 @@ export default function ChatThread({ messages, accentColor, onApplyModification,
                 <ToolCallDisplay key={tc.id} toolCall={tc} />
               ))}
 
-              {msg.proposedModification && (
+              {msg.proposedModification && !msg.proposedOptions && (
                 <ModificationCard
                   modification={msg.proposedModification}
                   onApply={() => onApplyModification(msg.proposedModification!, msg.id)}
                   applied={appliedMessageIds.has(msg.id)}
                 />
+              )}
+
+              {msg.proposedOptions && msg.proposedOptions.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {msg.proposedOptions.map((opt, i) => (
+                    <OptionCard
+                      key={i}
+                      option={opt}
+                      index={i}
+                      onApply={() => onApplyOption(opt, msg.id)}
+                      applied={appliedMessageIds.has(`${msg.id}-opt-${i}`)}
+                    />
+                  ))}
+                </div>
               )}
             </div>
           </div>

@@ -29,10 +29,11 @@ function titleContext(team: Team, sim?: SimulationResult): TeamContext {
     { key: 'top5Pct', label: 'UCL (Expanded)', sub: 'Top 5', color: '#C0C0C0' },
     { key: 'top7Pct', label: 'Any Europe', sub: 'Top 7', color: '#00CCAA' },
   ];
+  const primaryMetric = pickPrimaryMetric(cards, 'championPct', sim);
   return {
     team: team.abbr,
     zone: 'title',
-    primaryMetric: 'championPct',
+    primaryMetric,
     accentColor: getTeamColour(team.abbr),
     relevantCards: filterCards(cards, sim),
   };
@@ -45,10 +46,11 @@ function europeContext(team: Team, sim?: SimulationResult): TeamContext {
     { key: 'top6Pct', label: 'Europa League', sub: 'Top 6', color: '#FF6B35' },
     { key: 'top7Pct', label: 'Any Europe', sub: 'Top 7', color: '#00CCAA' },
   ];
+  const primaryMetric = pickPrimaryMetric(cards, 'top7Pct', sim);
   return {
     team: team.abbr,
     zone: 'europe',
-    primaryMetric: 'top7Pct',
+    primaryMetric,
     accentColor: getTeamColour(team.abbr),
     relevantCards: filterCards(cards, sim),
   };
@@ -61,13 +63,33 @@ function relegationContext(team: Team, sim?: SimulationResult): TeamContext {
     { key: 'top7Pct', label: 'Any Europe', sub: 'Top 7', color: '#00CCAA' },
     { key: 'top4Pct', label: 'Champions League', sub: 'Top 4', color: '#FFD700' },
   ];
+  const primaryMetric = pickPrimaryMetric(cards, 'survivalPct', sim);
   return {
     team: team.abbr,
     zone: 'relegation',
-    primaryMetric: 'survivalPct',
+    primaryMetric,
     accentColor: getTeamColour(team.abbr),
     relevantCards: filterCards(cards, sim),
   };
+}
+
+function pickPrimaryMetric(
+  cards: CardConfig[],
+  defaultMetric: TeamContext['primaryMetric'],
+  sim?: SimulationResult
+): TeamContext['primaryMetric'] {
+  if (!sim) return defaultMetric;
+
+  const isInteresting = (value: number) => value > 0.1 && value < 99.9;
+  const defaultValue = sim[defaultMetric] as number;
+  if (isInteresting(defaultValue)) return defaultMetric;
+
+  const fallback = cards.find((card) => isInteresting(sim[card.key] as number));
+  if (fallback) {
+    return fallback.key as TeamContext['primaryMetric'];
+  }
+
+  return defaultMetric;
 }
 
 function filterCards(cards: CardConfig[], sim?: SimulationResult): CardConfig[] {

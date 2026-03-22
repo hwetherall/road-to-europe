@@ -298,11 +298,26 @@ When the user says something like "make it more severe" or "adjust the numbers":
 - Explain what changed and why the new magnitude is reasonable (or flag if it seems excessive)
 - Output a new JSON block with the revised modification
 
+## PRESENT OPTIONS, NOT OPEN QUESTIONS
+When there are multiple valid interpretations of a scenario (e.g., the event may already be priced in, or the severity is ambiguous), present concrete labelled options — each with its own JSON block — so the user can just pick one. Format like this:
+
+**Option A: [description]** — [brief rationale]
+[JSON block for option A]
+
+**Option B: [description]** — [brief rationale]
+[JSON block for option B]
+
+**Option C: [description]** — [brief rationale, if applicable]
+[JSON block for option C]
+
+Each option gets its own complete JSON block. The user picks one and hits Apply. This is much better than dumping analysis and making the user figure out what to do next. Even when there's only one reasonable interpretation, frame it as "here's what I'd recommend" with a single JSON block and an invitation to adjust.
+
 ## DOUBLE-COUNTING WARNING
-If a scenario describes something that has ALREADY HAPPENED (a real, current injury), still include the JSON modification block, but add a clear warning that current bookmaker odds may already reflect this. Suggest they either:
-1. Apply it anyway if they believe their data source hasn't updated yet
-2. Use the inverse modification to see how much the event is already costing them
-The key point: ALWAYS include the JSON block even with the caveat. Let the user decide whether to apply it.
+If a scenario describes something that has ALREADY HAPPENED (a real, current injury), present the options clearly:
+- **Option A**: Apply the full modification (if the user believes baseline data hasn't updated)
+- **Option B**: Apply a reduced version (incremental effect of extending the known injury further)
+- **Option C**: Apply the inverse (see how much the event is already costing them — positive deltas)
+Each option MUST include its own JSON block. Let the user pick.
 
 ## CHAPTER AWARENESS
 You are aware of existing active chapters. When the user adds a new scenario:
@@ -315,9 +330,9 @@ Keep responses concise and in a confident pundit voice. Focus on the footballing
 
 // ── Response Parsing ──
 
-interface ParsedResponse {
-  content: string;
-  proposedModification?: {
+interface ParsedOption {
+  title: string;
+  modification?: {
     description: string;
     teamModifications: Array<{
       team: string;
@@ -332,11 +347,101 @@ interface ParsedResponse {
       drawDelta?: number;
     }>;
   };
+  fixtureLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+  confidence?: 'high' | 'medium' | 'low';
+  reasoning?: string;
+  type: 'scenario_modification' | 'fixture_lock';
+}
+
+interface ParsedResponse {
+  content: string;
+  proposedModification?: ParsedOption['modification'];
   proposedLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+  proposedOptions?: ParsedOption[];
   title?: string;
   confidence?: 'high' | 'medium' | 'low';
   reasoning?: string;
   toolCalls: Array<{ id: string; type: 'web_search'; query: string; status: 'complete' | 'error' }>;
+}
+
+function parseJsonLenient(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Tolerate common model formatting mistakes.
+    const sanitized = raw
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim();
+    try {
+      return JSON.parse(sanitized) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function extractJsonBlocks(content: string): Array<Record<string, unknown>> {
+  const blocks: Array<Record<string, unknown>> = [];
+
+  // Prefer explicitly typed JSON-like fences first.
+  const typedRegex = /```(?:json|jsonc|json5|JSON|JSONC|JSON5)\s*([\s\S]*?)\s*```/g;
+  let match: RegExpExecArray | null;
+  while ((match = typedRegex.exec(content)) !== null) {
+    const parsed = parseJsonLenient(match[1]);
+    if (parsed) blocks.push(parsed);
+  }
+
+  if (blocks.length > 0) return blocks;
+
+  // Fallback: generic fenced code that still looks like a JSON object payload.
+  const genericFenceRegex = /```[^\n]*\n([\s\S]*?)\s*```/g;
+  while ((match = genericFenceRegex.exec(content)) !== null) {
+    const candidate = match[1].trim();
+    if (!candidate.startsWith('{')) continue;
+    const parsed = parseJsonLenient(candidate);
+    if (parsed) blocks.push(parsed);
+  }
+
+  return blocks;
+}
+
+function scaleOptionModification(
+  modification: NonNullable<ParsedOption['modification']>,
+  factor: number
+): NonNullable<ParsedOption['modification']> {
+  return {
+    description: modification.description,
+    teamModifications: modification.teamModifications.map((tm) => ({
+      ...tm,
+      homeWinDelta: tm.homeWinDelta * factor,
+      awayWinDelta: tm.awayWinDelta * factor,
+      drawDelta: tm.drawDelta * factor,
+    })),
+    fixtureSpecificOverrides: modification.fixtureSpecificOverrides?.map((fo) => ({
+      ...fo,
+      homeWinDelta: typeof fo.homeWinDelta === 'number' ? fo.homeWinDelta * factor : undefined,
+      awayWinDelta: typeof fo.awayWinDelta === 'number' ? fo.awayWinDelta * factor : undefined,
+      drawDelta: typeof fo.drawDelta === 'number' ? fo.drawDelta * factor : undefined,
+    })),
+  };
+}
+
+function shouldExpandToAmbiguityOptions(content: string): boolean {
+  const lower = content.toLowerCase();
+  const ambiguitySignals = [
+    'double-count',
+    'already priced',
+    'already reflected',
+    'already happened',
+    'already out',
+    'one caveat',
+    'caveat',
+    'incremental effect',
+    'extension of that absence',
+  ];
+  return ambiguitySignals.some((signal) => lower.includes(signal));
 }
 
 function parseAgentResponse(
@@ -348,33 +453,94 @@ function parseAgentResponse(
     toolCalls: toolCallLog.map((tc) => ({ ...tc, type: 'web_search' as const })),
   };
 
-  // Extract JSON blocks (```json ... ```)
-  const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
+  // Extract ALL JSON blocks (supports json/jsonc/json5/uppercase/generic fences)
+  const jsonBlocks = extractJsonBlocks(content);
 
+  if (jsonBlocks.length > 0) {
+    // Remove all JSON blocks from displayed content
+    result.content = content
+      .replace(/```(?:json|jsonc|json5|JSON|JSONC|JSON5)\s*[\s\S]*?\s*```/g, '')
+      .replace(/```[^\n]*\n[\s\S]*?\s*```/g, (block) => {
+        // Keep non-JSON generic fenced blocks; strip only those that parse as JSON.
+        const inner = block.replace(/```[^\n]*\n?/, '').replace(/```$/, '').trim();
+        return parseJsonLenient(inner) ? '' : block;
+      })
+      .trim();
+
+    // Parse each block into an option
+    const options: ParsedOption[] = [];
+    for (const parsed of jsonBlocks) {
       if (parsed.type === 'scenario_modification' && parsed.modification) {
-        result.proposedModification = parsed.modification;
-        result.title = parsed.title;
-        result.confidence = parsed.confidence;
-        result.reasoning = parsed.reasoning;
+        options.push({
+          title: (parsed.title as string) ?? (parsed.modification as { description?: string })?.description ?? 'Scenario modification',
+          modification: parsed.modification as ParsedOption['modification'],
+          confidence: parsed.confidence as ParsedOption['confidence'],
+          reasoning: parsed.reasoning as string | undefined,
+          type: 'scenario_modification',
+        });
       } else if (parsed.type === 'fixture_lock' && parsed.fixtureLock) {
-        result.proposedLock = parsed.fixtureLock;
-        result.title = parsed.title;
-        result.reasoning = parsed.reasoning;
-        result.confidence = 'high';
+        options.push({
+          title: (parsed.title as string) ?? 'Fixture lock',
+          fixtureLock: parsed.fixtureLock as ParsedOption['fixtureLock'],
+          confidence: 'high',
+          reasoning: parsed.reasoning as string | undefined,
+          type: 'fixture_lock',
+        });
       }
-    } catch {
-      // JSON parsing failed — treat as plain text
     }
 
-    // Remove the JSON block from displayed content
-    result.content = content.replace(/```json\s*[\s\S]*?\s*```/, '').trim();
+    if (options.length === 1) {
+      // Single option — use the flat fields for backwards compat
+      const opt = options[0];
+      if (opt.type === 'fixture_lock') {
+        result.proposedLock = opt.fixtureLock;
+      } else if (opt.modification && shouldExpandToAmbiguityOptions(content)) {
+        // If the assistant mentions ambiguity/caveats but only provided one block,
+        // synthesise A/B/C options so the user can pick without re-prompting.
+        const full = opt.modification;
+        const reduced = scaleOptionModification(full, 0.5);
+        const inverse = scaleOptionModification(full, -1);
+        result.proposedOptions = [
+          {
+            title: `Option A: ${opt.title || 'Apply full impact'}`,
+            modification: full,
+            confidence: opt.confidence ?? 'medium',
+            reasoning: opt.reasoning,
+            type: 'scenario_modification',
+          },
+          {
+            title: 'Option B: Reduced incremental impact',
+            modification: reduced,
+            confidence: 'low',
+            reasoning:
+              'Conservative variant in case part of this effect is already reflected in baseline odds.',
+            type: 'scenario_modification',
+          },
+          {
+            title: 'Option C: Inverse / already-priced test',
+            modification: inverse,
+            confidence: 'low',
+            reasoning:
+              'Diagnostic inverse to estimate how much of this event may already be priced into the baseline.',
+            type: 'scenario_modification',
+          },
+        ];
+      } else {
+        result.proposedModification = opt.modification;
+      }
+      if (!result.proposedOptions) {
+        result.title = opt.title;
+        result.confidence = opt.confidence;
+        result.reasoning = opt.reasoning;
+      }
+    } else if (options.length > 1) {
+      // Multiple options — send as array
+      result.proposedOptions = options;
+    }
   }
 
   // Also check for <modification> tags (V3A fallback format)
-  if (!result.proposedModification) {
+  if (!result.proposedModification && !result.proposedOptions) {
     const modMatch = content.match(/<modification>\s*([\s\S]*?)\s*<\/modification>/);
     if (modMatch) {
       try {

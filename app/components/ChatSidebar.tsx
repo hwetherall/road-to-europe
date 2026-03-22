@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { Chapter, ChatMessage, ScenarioModification } from '@/lib/chat-types';
+import { Chapter, ChatMessage, ScenarioModification, ProposedOption } from '@/lib/chat-types';
 import ChaptersPanel from './ChaptersPanel';
 import ChatThread from './ChatThread';
 import ChatInput from './ChatInput';
@@ -47,9 +47,21 @@ export default function ChatSidebar({
     proposedLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
   }>>({});
   const pendingLocksRef = useRef<Record<string, { fixtureId: string; result: 'home' | 'draw' | 'away' }>>({});
+  /** Incremented on chat reset so in-flight requests ignore stale responses. */
+  const chatSessionRef = useRef(0);
+
+  const handleResetChat = useCallback(() => {
+    chatSessionRef.current += 1;
+    setMessages([]);
+    setAppliedMessageIds(new Set());
+    setIsProcessing(false);
+    responseMetadataRef.current = {};
+    pendingLocksRef.current = {};
+  }, []);
 
   const handleSend = useCallback(
     async (text: string) => {
+      const session = chatSessionRef.current;
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -96,6 +108,8 @@ export default function ChatSidebar({
 
         const data = await res.json();
 
+        if (session !== chatSessionRef.current) return;
+
         // Store metadata from the response for chapter creation
         const responseMetadata = {
           title: data.title as string | undefined,
@@ -111,6 +125,7 @@ export default function ChatSidebar({
           content: data.content ?? data.message ?? 'I couldn\'t process that request.',
           timestamp: Date.now(),
           proposedModification: data.proposedModification ?? undefined,
+          proposedOptions: data.proposedOptions ?? undefined,
           toolCalls: data.toolCalls ?? undefined,
         };
 
@@ -127,6 +142,7 @@ export default function ChatSidebar({
           pendingLocksRef.current[thinkingId] = responseMetadata.proposedLock;
         }
       } catch {
+        if (session !== chatSessionRef.current) return;
         // Replace thinking with error
         setMessages((prev) =>
           prev.map((m) =>
@@ -140,7 +156,9 @@ export default function ChatSidebar({
           )
         );
       } finally {
-        setIsProcessing(false);
+        if (session === chatSessionRef.current) {
+          setIsProcessing(false);
+        }
       }
     },
     [messages, mode, selectedTeam, teams, chapters, sensitivityResults]
@@ -207,6 +225,69 @@ export default function ChatSidebar({
     [onAddChapter, mode]
   );
 
+  const handleApplyOption = useCallback(
+    (option: ProposedOption, messageId: string) => {
+      // Find which index this option is so we can track it
+      const msg = messages.find((m) => m.id === messageId);
+      const optIndex = msg?.proposedOptions?.indexOf(option) ?? 0;
+      const appliedKey = `${messageId}-opt-${optIndex}`;
+
+      if (option.type === 'fixture_lock' && option.fixtureLock) {
+        const chapter: Chapter = {
+          id: crypto.randomUUID(),
+          title: option.title,
+          type: 'fixture_lock',
+          status: 'active',
+          createdAt: Date.now(),
+          fixtureLock: option.fixtureLock,
+          confidence: 'high',
+          reasoning: option.reasoning,
+          mode,
+        };
+        onAddChapter(chapter);
+        setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: 'system' as const,
+            content: `Chapter created: "${chapter.title}"`,
+            timestamp: Date.now(),
+            chapterId: chapter.id,
+          },
+        ]);
+        return;
+      }
+
+      if (option.modification) {
+        const chapter: Chapter = {
+          id: crypto.randomUUID(),
+          title: option.title,
+          type: 'probability_modifier',
+          status: 'active',
+          createdAt: Date.now(),
+          modification: option.modification,
+          confidence: option.confidence ?? 'medium',
+          reasoning: option.reasoning,
+          mode,
+        };
+        onAddChapter(chapter);
+        setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: 'system' as const,
+            content: `Chapter created: "${chapter.title}"`,
+            timestamp: Date.now(),
+            chapterId: chapter.id,
+          },
+        ]);
+      }
+    },
+    [onAddChapter, mode, messages]
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -233,11 +314,26 @@ export default function ChatSidebar({
           />
         </div>
 
+        <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
+          <span className="font-oswald text-[10px] tracking-[0.12em] uppercase text-white/40">
+            Chat
+          </span>
+          <button
+            type="button"
+            onClick={handleResetChat}
+            disabled={messages.length === 0 && !isProcessing}
+            className="text-[11px] text-white/45 hover:text-white/80 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          >
+            Reset chat
+          </button>
+        </div>
+
         {/* Chat Thread */}
         <ChatThread
           messages={messages}
           accentColor={accentColor}
           onApplyModification={handleApplyModification}
+          onApplyOption={handleApplyOption}
           appliedMessageIds={appliedMessageIds}
         />
 

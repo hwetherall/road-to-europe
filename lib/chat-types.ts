@@ -45,6 +45,15 @@ export interface FixtureOverride {
 
 // ── Chat System ──
 
+export interface ProposedOption {
+  title: string;
+  modification?: ScenarioModification;
+  fixtureLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+  confidence?: 'high' | 'medium' | 'low';
+  reasoning?: string;
+  type: 'scenario_modification' | 'fixture_lock';
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -54,6 +63,7 @@ export interface ChatMessage {
   // Agent-specific metadata
   researchPlan?: string[];
   proposedModification?: ScenarioModification;
+  proposedOptions?: ProposedOption[];
   chapterId?: string;
   toolCalls?: ToolCall[];
   isThinking?: boolean;

@@ -9,6 +9,7 @@ import {
   SensitivityMetric,
   TeamContext,
 } from '@/lib/types';
+import { Chapter } from '@/lib/chat-types';
 import { HARDCODED_STANDINGS, KNOWN_FIXTURES, ODDS_API_NAME_MAP } from '@/lib/constants';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { simulate } from '@/lib/montecarlo';
@@ -16,12 +17,21 @@ import { sensitivityScan } from '@/lib/sensitivity';
 import { getTeamContext } from '@/lib/team-context';
 import { getTeamColour, getTeamTextColour } from '@/lib/team-colours';
 import { teamElo, eloProb } from '@/lib/elo';
+import { applyChapters } from '@/lib/modification-engine';
+import {
+  addChapter,
+  removeChapter,
+  toggleChapter,
+  resetAllChapters,
+  createFixtureLockChapter,
+} from '@/lib/chapters';
 import TeamSelector from './TeamSelector';
 import QualificationCards from './QualificationCards';
 import PositionHistogram from './PositionHistogram';
 import SensitivityChart from './SensitivityChart';
 import WhatIfPanel from './WhatIfPanel';
-import WhatIfComparison from './WhatIfComparison';
+import ScenarioComparison from './ScenarioComparison';
+import ChatSidebar from './ChatSidebar';
 import FixtureList from './FixtureList';
 import StandingsTable from './StandingsTable';
 import LeagueProjections from './LeagueProjections';
@@ -55,11 +65,18 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // What-If state
   const [whatIfActive, setWhatIfActive] = useState(false);
-  const [locks, setLocks] = useState<Record<string, 'home' | 'draw' | 'away'>>({});
-  const [baseSimResult, setBaseSimResult] = useState<SimulationResult | null>(null);
-  const [whatIfSimResult, setWhatIfSimResult] = useState<SimulationResult | null>(null);
-  const whatIfTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const whatIfPanelRef = useRef<HTMLDivElement | null>(null);
+
+  // Chapter state (V3A)
+  const [scenarioState, setScenarioState] = useState({ chapters: [] as Chapter[] });
+  const chapters = scenarioState.chapters;
+
+  // Sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Modified simulation results (with chapters applied)
+  const [modifiedSimResults, setModifiedSimResults] = useState<SimulationResult[] | null>(null);
+  const chapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const allFixtures = useMemo(() => {
     if (fixtures.length > 0) return fixtures;
@@ -67,17 +84,32 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     return [...KNOWN_FIXTURES, ...generated];
   }, [fixtures]);
 
-  const teamResult = useMemo(
+  // Baseline result for selected team (no chapters)
+  const baselineTeamResult = useMemo(
     () => simResults?.find((r) => r.team === selectedTeam) ?? null,
     [simResults, selectedTeam]
   );
 
+  // Modified result for selected team (with chapters)
+  const modifiedTeamResult = useMemo(
+    () => modifiedSimResults?.find((r) => r.team === selectedTeam) ?? null,
+    [modifiedSimResults, selectedTeam]
+  );
+
+  // Active display result: modified if chapters exist, baseline otherwise
+  const activeChapters = useMemo(
+    () => chapters.filter((c) => c.status === 'active'),
+    [chapters]
+  );
+  const hasActiveChapters = activeChapters.length > 0;
+  const displayResult = hasActiveChapters ? (modifiedTeamResult ?? baselineTeamResult) : baselineTeamResult;
+
   const teamContext: TeamContext | null = useMemo(() => {
     const team = teams.find((t) => t.abbr === selectedTeam);
     if (!team) return null;
-    const result = whatIfSimResult ?? teamResult ?? undefined;
+    const result = displayResult ?? undefined;
     return getTeamContext(team, teams, result);
-  }, [teams, selectedTeam, teamResult, whatIfSimResult]);
+  }, [teams, selectedTeam, displayResult]);
 
   const sensitivityMetric: SensitivityMetric = useMemo(
     () => teamContext?.primaryMetric ?? 'top7Pct',
@@ -87,6 +119,17 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   const accentColor = getTeamColour(selectedTeam);
   const textColor = getTeamTextColour(selectedTeam);
+
+  // Derive locks from chapters for the WhatIfPanel display
+  const locks = useMemo(() => {
+    const result: Record<string, 'home' | 'draw' | 'away'> = {};
+    for (const ch of activeChapters) {
+      if (ch.type === 'fixture_lock' && ch.fixtureLock) {
+        result[ch.fixtureLock.fixtureId] = ch.fixtureLock.result;
+      }
+    }
+    return result;
+  }, [activeChapters]);
 
   // URL state sync
   const handleSelectTeam = useCallback((abbr: string) => {
@@ -115,7 +158,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         }
       }
 
-      // Parse live odds into a lookup by "homeAbbr-awayAbbr"
       type OddsEntry = { homeTeam: string; awayTeam: string; date: string; homeWin: number; draw: number; awayWin: number };
       const oddsLookup = new Map<string, OddsEntry>();
       if (oddsRes.ok) {
@@ -135,10 +177,8 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         const fixturesData = await fixturesRes.json();
         if (fixturesData.fixtures?.length > 0) {
           const known = fixturesData.fixtures.map((fixture: Fixture) => {
-            // Finished fixtures don't need probabilities — keep as-is
             if (fixture.status === 'FINISHED') return fixture;
 
-            // Try to match with live odds first
             const oddsKey = `${fixture.homeTeam}-${fixture.awayTeam}`;
             const liveOdds = oddsLookup.get(oddsKey);
             if (liveOdds && liveOdds.homeWin > 0) {
@@ -151,7 +191,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               };
             }
 
-            // If fixture already has probabilities (e.g. from hardcoded data), keep them
             if (
               fixture.homeWinProb !== undefined &&
               fixture.drawProb !== undefined &&
@@ -160,7 +199,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               return fixture;
             }
 
-            // Fall back to Elo estimation
             const homeTeam = nextTeams.find((t) => t.abbr === fixture.homeTeam);
             const awayTeam = nextTeams.find((t) => t.abbr === fixture.awayTeam);
             if (!homeTeam || !awayTeam) return fixture;
@@ -192,10 +230,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       const results = simulate(teams, allFixtures, SIM_COUNT);
       setSimResults(results);
 
-      // Store base result for what-if comparison
-      const baseResult = results.find((r) => r.team === selectedTeam) ?? null;
-      setBaseSimResult(baseResult);
-
       setPhase('Running sensitivity analysis...');
 
       setTimeout(() => {
@@ -213,40 +247,28 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     }, 50);
   }, [teams, allFixtures, selectedTeam, sensitivityMetric]);
 
-  // What-if re-simulation (debounced)
-  const runWhatIfSim = useCallback(() => {
-    if (whatIfTimerRef.current) clearTimeout(whatIfTimerRef.current);
+  // Re-simulate with chapters applied (debounced)
+  const runChapterSim = useCallback(() => {
+    if (chapterTimerRef.current) clearTimeout(chapterTimerRef.current);
 
-    const lockCount = Object.keys(locks).length;
-    if (lockCount === 0) {
-      setWhatIfSimResult(null);
+    if (activeChapters.length === 0) {
+      setModifiedSimResults(null);
       return;
     }
 
-    whatIfTimerRef.current = setTimeout(() => {
-      // Apply locks to fixtures
-      const lockedFixtures = allFixtures.map((f) => {
-        const lock = locks[f.id];
-        if (!lock) return f;
-        return {
-          ...f,
-          homeWinProb: lock === 'home' ? 1.0 : 0.0,
-          drawProb: lock === 'draw' ? 1.0 : 0.0,
-          awayWinProb: lock === 'away' ? 1.0 : 0.0,
-        };
-      });
-
-      const results = simulate(teams, lockedFixtures, SIM_COUNT);
-      const result = results.find((r) => r.team === selectedTeam) ?? null;
-      setWhatIfSimResult(result);
+    chapterTimerRef.current = setTimeout(() => {
+      const modifiedFixtures = applyChapters(allFixtures, chapters);
+      const results = simulate(teams, modifiedFixtures, SIM_COUNT);
+      setModifiedSimResults(results);
     }, 300);
-  }, [locks, allFixtures, teams, selectedTeam]);
+  }, [activeChapters.length, chapters, allFixtures, teams]);
 
+  // Re-run chapter simulation when chapters change
   useEffect(() => {
-    if (whatIfActive) runWhatIfSim();
-  }, [locks, whatIfActive, runWhatIfSim]);
+    runChapterSim();
+  }, [runChapterSim]);
 
-  // Bring What-If controls into view when enabled.
+  // Bring What-If controls into view when enabled
   useEffect(() => {
     if (!whatIfActive) return;
     const id = window.setTimeout(() => {
@@ -265,9 +287,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           const initFixtures = [...KNOWN_FIXTURES, ...generateRemainingFixtures(HARDCODED_STANDINGS, KNOWN_FIXTURES)];
           const results = simulate(HARDCODED_STANDINGS, initFixtures, SIM_COUNT);
           setSimResults(results);
-
-          const baseResult = results.find((r) => r.team === initialTeam) ?? null;
-          setBaseSimResult(baseResult);
 
           setPhase('Running sensitivity analysis...');
           setTimeout(() => {
@@ -288,15 +307,10 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When team changes, re-run sensitivity (sim results are already for all teams)
+  // When team changes, re-run sensitivity
   useEffect(() => {
     if (!simResults || running) return;
 
-    // Update base result for what-if
-    const baseResult = simResults.find((r) => r.team === selectedTeam) ?? null;
-    setBaseSimResult(baseResult);
-
-    // Re-run sensitivity for new team
     setPhase('Updating sensitivity...');
     setTimeout(() => {
       const sensitivity = sensitivityScan(
@@ -308,30 +322,87 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       );
       setSensitivityResults(sensitivity);
       setPhase('');
-
-      // Re-run what-if if active
-      if (whatIfActive && Object.keys(locks).length > 0) {
-        runWhatIfSim();
-      }
     }, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTeam, sensitivityMetric]);
 
-  const handleToggleLock = useCallback((fixtureId: string, result: 'home' | 'draw' | 'away') => {
-    setLocks((prev) => {
-      const next = { ...prev };
-      if (next[fixtureId] === result) {
-        delete next[fixtureId];
-      } else {
-        next[fixtureId] = result;
-      }
-      return next;
-    });
+  // Chapter management handlers
+  const handleAddChapter = useCallback((chapter: Chapter) => {
+    setScenarioState((prev) => addChapter(prev, chapter));
   }, []);
 
+  const handleRemoveChapter = useCallback((id: string) => {
+    setScenarioState((prev) => removeChapter(prev, id));
+  }, []);
+
+  const handleToggleChapter = useCallback((id: string) => {
+    setScenarioState((prev) => toggleChapter(prev, id));
+  }, []);
+
+  const handleResetChapters = useCallback(() => {
+    setScenarioState(resetAllChapters());
+    setModifiedSimResults(null);
+  }, []);
+
+  // What-If lock handler — creates/updates/removes chapters
+  const handleToggleLock = useCallback(
+    (fixtureId: string, result: 'home' | 'draw' | 'away') => {
+      const existingChapter = chapters.find(
+        (c) => c.type === 'fixture_lock' && c.fixtureLock?.fixtureId === fixtureId
+      );
+
+      if (existingChapter) {
+        if (existingChapter.fixtureLock?.result === result) {
+          // Toggle off
+          setScenarioState((prev) => removeChapter(prev, existingChapter.id));
+        } else {
+          // Update to different result
+          setScenarioState((prev) => ({
+            ...prev,
+            chapters: prev.chapters.map((c) =>
+              c.id === existingChapter.id
+                ? { ...c, fixtureLock: { fixtureId, result }, title: getFixtureLockTitle(fixtureId, result) }
+                : c
+            ),
+          }));
+        }
+      } else {
+        // New lock chapter
+        const fixture = allFixtures.find((f) => f.id === fixtureId);
+        if (!fixture) return;
+        const chapter = createFixtureLockChapter(
+          fixtureId,
+          result,
+          fixture.homeTeam,
+          fixture.awayTeam
+        );
+        setScenarioState((prev) => addChapter(prev, chapter));
+      }
+    },
+    [chapters, allFixtures]
+  );
+
+  // Helper to generate lock title on update
+  const getFixtureLockTitle = useCallback(
+    (fixtureId: string, result: 'home' | 'draw' | 'away') => {
+      const fixture = allFixtures.find((f) => f.id === fixtureId);
+      if (!fixture) return 'Unknown fixture';
+      const resultLabels = {
+        home: `${fixture.homeTeam} win`,
+        draw: 'Draw',
+        away: `${fixture.awayTeam} win`,
+      };
+      return `${fixture.homeTeam} vs ${fixture.awayTeam}: ${resultLabels[result]}`;
+    },
+    [allFixtures]
+  );
+
   const handleResetLocks = useCallback(() => {
-    setLocks({});
-    setWhatIfSimResult(null);
+    // Remove only fixture lock chapters
+    setScenarioState((prev) => ({
+      ...prev,
+      chapters: prev.chapters.filter((c) => c.type !== 'fixture_lock'),
+    }));
   }, []);
 
   // Find selected team data
@@ -344,8 +415,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const teamPosition = sortedTeams.findIndex((t) => t.abbr === selectedTeam) + 1;
   const gamesRemaining = currentTeam ? 38 - currentTeam.played : 0;
 
-  // Display result: what-if overrides base when active
-  const displayResult = whatIfSimResult ?? teamResult;
   const lockCount = Object.keys(locks).length;
 
   return (
@@ -364,7 +433,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             background: `radial-gradient(circle, ${accentColor}15 0%, transparent 70%)`,
           }}
         />
-        <div className="max-w-[900px] mx-auto">
+        <div className="max-w-[900px] mx-auto" style={sidebarOpen ? { marginRight: '400px' } : undefined}>
           <div className="flex items-center gap-3 mb-1.5">
             <div
               className="w-10 h-10 rounded-lg border-2 flex items-center justify-center font-oswald font-bold text-xs"
@@ -426,148 +495,197 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-[900px] mx-auto px-4 py-6">
-        {/* Toolbar */}
-        <div className="flex items-center gap-4 mb-7 flex-wrap">
-          <RefreshButton
-            onRefresh={runSimulation}
-            running={running}
-            hasResults={simResults !== null}
-            fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
-            simCount={SIM_COUNT}
-          />
-          <button
-            onClick={() => {
-              setWhatIfActive(!whatIfActive);
-              if (whatIfActive) {
-                // Turning off — clear what-if result
-                setWhatIfSimResult(null);
-              }
-            }}
-            className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
-              whatIfActive
-                ? 'text-white border-amber-500/50'
-                : 'bg-transparent text-white/50 border-white/[0.12] hover:border-white/20'
-            }`}
-            style={
-              whatIfActive
-                ? { background: 'rgba(245,158,11,0.15)' }
-                : undefined
-            }
-          >
-            {whatIfActive ? 'Exit What-If' : 'What-If Mode'}
-          </button>
+      {/* Content area with sidebar */}
+      <div className="flex">
+        {/* Main content */}
+        <div
+          className="flex-1 transition-all duration-300"
+          style={sidebarOpen ? { marginRight: '380px' } : undefined}
+        >
+          <div className="max-w-[900px] mx-auto px-4 py-6">
+            {/* Toolbar */}
+            <div className="flex items-center gap-4 mb-7 flex-wrap">
+              <RefreshButton
+                onRefresh={runSimulation}
+                running={running}
+                hasResults={simResults !== null}
+                fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
+                simCount={SIM_COUNT}
+              />
+              <button
+                onClick={() => {
+                  setWhatIfActive(!whatIfActive);
+                }}
+                className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
+                  whatIfActive
+                    ? 'text-white border-amber-500/50'
+                    : 'bg-transparent text-white/50 border-white/[0.12] hover:border-white/20'
+                }`}
+                style={
+                  whatIfActive
+                    ? { background: 'rgba(245,158,11,0.15)' }
+                    : undefined
+                }
+              >
+                {whatIfActive ? 'Exit What-If' : 'What-If Mode'}
+              </button>
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer relative ${
+                  sidebarOpen
+                    ? 'text-white'
+                    : 'bg-transparent text-white/50 border-white/[0.12] hover:border-white/20'
+                }`}
+                style={
+                  sidebarOpen
+                    ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
+                    : undefined
+                }
+              >
+                Chat
+                {chapters.length > 0 && !sidebarOpen && (
+                  <span
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                    style={{ background: accentColor }}
+                  >
+                    {chapters.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {running && phase && (
+              <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${accentColor}aa` }}>
+                <div
+                  className="w-4 h-4 border-2 rounded-full animate-spin"
+                  style={{ borderColor: `${accentColor}33`, borderTopColor: accentColor }}
+                />
+                {phase}
+              </div>
+            )}
+
+            {/* Scenario Comparison Strip */}
+            {hasActiveChapters && baselineTeamResult && modifiedTeamResult && teamContext && (
+              <ScenarioComparison
+                baselineResult={baselineTeamResult}
+                modifiedResult={modifiedTeamResult}
+                teamContext={teamContext}
+                chapters={chapters}
+              />
+            )}
+
+            {/* What-If Panel */}
+            {whatIfActive && (
+              <div ref={whatIfPanelRef}>
+                <WhatIfPanel
+                  fixtures={allFixtures}
+                  locks={locks}
+                  onToggleLock={handleToggleLock}
+                  onResetAll={handleResetLocks}
+                  selectedTeam={selectedTeam}
+                  sensitivityResults={sensitivityResults}
+                  teams={teams}
+                />
+              </div>
+            )}
+
+            {/* Qualification Cards */}
+            {displayResult && teamContext && (
+              <QualificationCards result={displayResult} cards={teamContext.relevantCards} />
+            )}
+
+            {/* Position Histogram */}
+            {displayResult && (
+              <PositionHistogram
+                result={displayResult}
+                accentColor={accentColor}
+                numSims={SIM_COUNT}
+              />
+            )}
+
+            {/* Sensitivity Chart */}
+            {sensitivityResults && sensitivityResults.length > 0 && (
+              <SensitivityChart
+                results={sensitivityResults}
+                selectedTeam={selectedTeam}
+                teams={teams}
+                metricLabel={sensitivityMetricLabel}
+              />
+            )}
+
+            {/* League Projections */}
+            {simResults && (
+              <LeagueProjections
+                results={simResults}
+                selectedTeam={selectedTeam}
+                accentColor={accentColor}
+                teams={teams}
+              />
+            )}
+
+            {/* Fixture List */}
+            <FixtureList
+              fixtures={allFixtures}
+              selectedTeam={selectedTeam}
+              teams={teams}
+              accentColor={accentColor}
+            />
+
+            {/* Standings */}
+            <StandingsTable teams={teams} selectedTeam={selectedTeam} accentColor={accentColor} />
+
+            {/* Methodology */}
+            <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 mb-8 text-xs text-white/40 leading-7">
+              <div className="font-oswald text-[13px] tracking-widest uppercase text-white/50 mb-2">
+                Methodology
+              </div>
+              Monte Carlo simulation of {SIM_COUNT.toLocaleString()} season outcomes.
+              Match probabilities sourced from bookmaker odds where available, and
+              estimated from Elo ratings (derived from points-per-game) with home
+              advantage adjustment for remaining fixtures. Each simulation randomly
+              resolves all remaining matches using Poisson-distributed goal sampling,
+              calculates final standings, and records finishing positions.
+              <br />
+              <br />
+              <strong className="text-white/50">Sensitivity analysis</strong> locks each
+              fixture to every possible result (home win / draw / away win) and re-runs
+              1,000 simulations per lock to measure the impact on the selected team&apos;s
+              qualification odds.
+              <br />
+              <br />
+              <strong className="text-white/50">What-If mode</strong> lets you manually lock
+              fixture outcomes and see how they affect the selected team&apos;s odds in real
+              time. Lock any fixture — not just the selected team&apos;s — since a
+              rival&apos;s loss can matter more than your team&apos;s win.
+              <br />
+              <br />
+              <strong className="text-white/50">Scenarios</strong> stack multiple what-if
+              assumptions (fixture locks and probability modifiers) to explore compound
+              effects on qualification odds. Use the chat sidebar to describe scenarios
+              in natural language.
+              <div className="mt-3 text-white/25 italic">
+                Standings as of March 21, 2026. European places assume standard
+                allocation (no cup winners adjustments).
+              </div>
+            </div>
+          </div>
         </div>
 
-        {running && phase && (
-          <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${accentColor}aa` }}>
-            <div
-              className="w-4 h-4 border-2 rounded-full animate-spin"
-              style={{ borderColor: `${accentColor}33`, borderTopColor: accentColor }}
-            />
-            {phase}
-          </div>
-        )}
-
-        {/* What-If Panel */}
-        {whatIfActive && (
-          <div ref={whatIfPanelRef}>
-            <WhatIfPanel
-              fixtures={allFixtures}
-              locks={locks}
-              onToggleLock={handleToggleLock}
-              onResetAll={handleResetLocks}
-              selectedTeam={selectedTeam}
-              sensitivityResults={sensitivityResults}
-              teams={teams}
-            />
-          </div>
-        )}
-
-        {/* What-If Comparison Strip */}
-        {whatIfActive && baseSimResult && whatIfSimResult && teamContext && lockCount > 0 && (
-          <WhatIfComparison
-            baseResult={baseSimResult}
-            whatIfResult={whatIfSimResult}
-            teamContext={teamContext}
-            lockCount={lockCount}
-          />
-        )}
-
-        {/* Qualification Cards */}
-        {displayResult && teamContext && (
-          <QualificationCards result={displayResult} cards={teamContext.relevantCards} />
-        )}
-
-        {/* Position Histogram */}
-        {displayResult && (
-          <PositionHistogram
-            result={displayResult}
-            accentColor={accentColor}
-            numSims={SIM_COUNT}
-          />
-        )}
-
-        {/* Sensitivity Chart */}
-        {sensitivityResults && sensitivityResults.length > 0 && (
-          <SensitivityChart
-            results={sensitivityResults}
-            selectedTeam={selectedTeam}
-            teams={teams}
-            metricLabel={sensitivityMetricLabel}
-          />
-        )}
-
-        {/* League Projections */}
-        {simResults && (
-          <LeagueProjections
-            results={simResults}
-            selectedTeam={selectedTeam}
-            accentColor={accentColor}
-            teams={teams}
-          />
-        )}
-
-        {/* Fixture List */}
-        <FixtureList
-          fixtures={allFixtures}
+        {/* Chat Sidebar */}
+        <ChatSidebar
+          isOpen={sidebarOpen}
+          chapters={chapters}
+          onAddChapter={handleAddChapter}
+          onRemoveChapter={handleRemoveChapter}
+          onToggleChapter={handleToggleChapter}
+          onResetChapters={handleResetChapters}
           selectedTeam={selectedTeam}
           teams={teams}
           accentColor={accentColor}
+          sensitivityResults={sensitivityResults}
+          baselineResult={baselineTeamResult}
+          modifiedResult={modifiedTeamResult}
         />
-
-        {/* Standings */}
-        <StandingsTable teams={teams} selectedTeam={selectedTeam} accentColor={accentColor} />
-
-        {/* Methodology */}
-        <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 mb-8 text-xs text-white/40 leading-7">
-          <div className="font-oswald text-[13px] tracking-widest uppercase text-white/50 mb-2">
-            Methodology
-          </div>
-          Monte Carlo simulation of {SIM_COUNT.toLocaleString()} season outcomes.
-          Match probabilities sourced from bookmaker odds where available, and
-          estimated from Elo ratings (derived from points-per-game) with home
-          advantage adjustment for remaining fixtures. Each simulation randomly
-          resolves all remaining matches using Poisson-distributed goal sampling,
-          calculates final standings, and records finishing positions.
-          <br />
-          <br />
-          <strong className="text-white/50">Sensitivity analysis</strong> locks each
-          fixture to every possible result (home win / draw / away win) and re-runs
-          1,000 simulations per lock to measure the impact on the selected team&apos;s
-          qualification odds.
-          <br />
-          <br />
-          <strong className="text-white/50">What-If mode</strong> lets you manually lock
-          fixture outcomes and see how they affect the selected team&apos;s odds in real
-          time. Lock any fixture — not just the selected team&apos;s — since a
-          rival&apos;s loss can matter more than your team&apos;s win.
-          <div className="mt-3 text-white/25 italic">
-            Standings as of March 21, 2026. European places assume standard
-            allocation (no cup winners adjustments).
-          </div>
-        </div>
       </div>
     </div>
   );

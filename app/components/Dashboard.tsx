@@ -25,6 +25,7 @@ import {
   resetAllChapters,
   createFixtureLockChapter,
 } from '@/lib/chapters';
+import { readKyleState, writeKyleState } from '@/lib/kyle';
 import TeamSelector from './TeamSelector';
 import QualificationCards from './QualificationCards';
 import PositionHistogram from './PositionHistogram';
@@ -36,6 +37,9 @@ import FixtureList from './FixtureList';
 import StandingsTable from './StandingsTable';
 import LeagueProjections from './LeagueProjections';
 import RefreshButton from './RefreshButton';
+import KyleToggle from './KyleToggle';
+import KyleMiniDashboard from './KyleMiniDashboard';
+import DeepAnalysisModal from './DeepAnalysisModal';
 
 const SIM_COUNT = 10000;
 const SENSITIVITY_SIMS = 1000;
@@ -73,6 +77,12 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Kyle mode state
+  const [kyleMode, setKyleMode] = useState<boolean>(() => readKyleState());
+
+  // Deep Analysis modal state
+  const [deepAnalysisOpen, setDeepAnalysisOpen] = useState(false);
 
   // Modified simulation results (with chapters applied)
   const [modifiedSimResults, setModifiedSimResults] = useState<SimulationResult[] | null>(null);
@@ -139,15 +149,16 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     window.history.replaceState({}, '', url.toString());
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (): Promise<{ teams: Team[]; fixtures: Fixture[] }> => {
+    let nextTeams = teams;
+    let nextFixtures: Fixture[] = [];
+
     try {
       const [standingsRes, fixturesRes, oddsRes] = await Promise.all([
         fetch('/api/standings'),
         fetch('/api/fixtures'),
         fetch('/api/odds'),
       ]);
-
-      let nextTeams = teams;
 
       if (standingsRes.ok) {
         const standingsData = await standingsRes.json();
@@ -214,12 +225,20 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           });
 
           const generated = generateRemainingFixtures(nextTeams, known);
-          setFixtures([...known, ...generated]);
+          nextFixtures = [...known, ...generated];
+          setFixtures(nextFixtures);
         }
       }
     } catch {
       setDataSource('hardcoded');
     }
+
+    if (nextFixtures.length === 0) {
+      nextFixtures = [...KNOWN_FIXTURES, ...generateRemainingFixtures(nextTeams, KNOWN_FIXTURES)];
+      setFixtures(nextFixtures);
+    }
+
+    return { teams: nextTeams, fixtures: nextFixtures };
   }, [teams]);
 
   const runSimulation = useCallback(() => {
@@ -279,20 +298,19 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // Auto-fetch + simulate on mount
   useEffect(() => {
-    fetchData().then(() => {
+    fetchData().then(({ teams: fetchedTeams, fixtures: fetchedFixtures }) => {
       setTimeout(() => {
         setRunning(true);
         setPhase('Running base simulation...');
         setTimeout(() => {
-          const initFixtures = [...KNOWN_FIXTURES, ...generateRemainingFixtures(HARDCODED_STANDINGS, KNOWN_FIXTURES)];
-          const results = simulate(HARDCODED_STANDINGS, initFixtures, SIM_COUNT);
+          const results = simulate(fetchedTeams, fetchedFixtures, SIM_COUNT);
           setSimResults(results);
 
           setPhase('Running sensitivity analysis...');
           setTimeout(() => {
             const sensitivity = sensitivityScan(
-              HARDCODED_STANDINGS,
-              initFixtures,
+              fetchedTeams,
+              fetchedFixtures,
               initialTeam,
               SENSITIVITY_SIMS,
               sensitivityMetric
@@ -405,6 +423,40 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     }));
   }, []);
 
+  // Kyle mode handlers
+  const handleKyleToggle = useCallback(() => {
+    setKyleMode((prev) => {
+      const next = !prev;
+      writeKyleState(next);
+      if (next && !sidebarOpen) setSidebarOpen(true);
+      return next;
+    });
+  }, [sidebarOpen]);
+
+  const handleChatClose = useCallback(() => {
+    setSidebarOpen(false);
+    setKyleMode(false);
+    writeKyleState(false);
+  }, []);
+
+  const handleExitKyleMode = useCallback(() => {
+    setKyleMode(false);
+    writeKyleState(false);
+  }, []);
+
+  // Escape key exits Kyle mode (and closes chat)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && sidebarOpen) {
+        handleChatClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen, handleChatClose]);
+
+  const kyleActive = kyleMode && sidebarOpen;
+
   // Find selected team data
   const sortedTeams = [...teams].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
@@ -418,7 +470,11 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const lockCount = Object.keys(locks).length;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-inter">
+    <div
+      className={`bg-[#0a0a0a] text-white font-inter ${
+        kyleActive ? 'h-screen overflow-hidden flex flex-col' : 'min-h-screen'
+      }`}
+    >
       {/* Header */}
       <div
         className="border-b-2 px-6 py-8 relative overflow-hidden"
@@ -433,7 +489,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             background: `radial-gradient(circle, ${accentColor}15 0%, transparent 70%)`,
           }}
         />
-        <div className="max-w-[900px] mx-auto" style={sidebarOpen ? { marginRight: '400px' } : undefined}>
+        <div className="max-w-[900px] mx-auto" style={sidebarOpen && !kyleActive ? { marginRight: '400px' } : undefined}>
           <div className="flex items-center gap-3 mb-1.5">
             <div
               className="w-10 h-10 rounded-lg border-2 flex items-center justify-center font-oswald font-bold text-xs"
@@ -496,11 +552,28 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       </div>
 
       {/* Content area with sidebar */}
-      <div className="flex">
-        {/* Main content */}
+      <div className={`flex ${kyleActive ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
+        {/* Kyle Mini-Dashboard (left panel in Kyle mode) */}
+        {kyleActive && teamContext && (
+          <KyleMiniDashboard
+            selectedTeam={selectedTeam}
+            teams={teams}
+            displayResult={displayResult}
+            baselineResult={baselineTeamResult}
+            sensitivityResults={sensitivityResults}
+            cards={teamContext.relevantCards}
+            hasActiveChapters={hasActiveChapters}
+            accentColor={accentColor}
+            numSims={SIM_COUNT}
+            sensitivityMetric={sensitivityMetric}
+            sensitivityMetricLabel={sensitivityMetricLabel}
+          />
+        )}
+
+        {/* Main content — hidden in Kyle mode */}
         <div
-          className="flex-1 transition-all duration-300"
-          style={sidebarOpen ? { marginRight: '380px' } : undefined}
+          className={`transition-all duration-300 ${kyleActive ? 'hidden' : 'flex-1'}`}
+          style={sidebarOpen && !kyleActive ? { marginRight: '380px' } : undefined}
         >
           <div className="max-w-[900px] mx-auto px-4 py-6">
             {/* Toolbar */}
@@ -530,7 +603,13 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 {whatIfActive ? 'Exit What-If' : 'What-If Mode'}
               </button>
               <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
+                onClick={() => {
+                  if (sidebarOpen) {
+                    handleChatClose();
+                  } else {
+                    setSidebarOpen(true);
+                  }
+                }}
                 className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer relative ${
                   sidebarOpen
                     ? 'text-white'
@@ -552,6 +631,23 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                   </span>
                 )}
               </button>
+              <KyleToggle
+                active={kyleActive}
+                onToggle={handleKyleToggle}
+                accentColor={accentColor}
+              />
+              {selectedTeam === 'NEW' && (
+                <button
+                  onClick={() => setDeepAnalysisOpen(true)}
+                  className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/50 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
+                >
+                  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                    <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
+                    <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Deep Analysis
+                </button>
+              )}
             </div>
 
             {running && phase && (
@@ -604,7 +700,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             )}
 
             {/* Sensitivity Chart */}
-            {sensitivityResults && sensitivityResults.length > 0 && (
+            {sensitivityResults && (
               <SensitivityChart
                 results={sensitivityResults}
                 selectedTeam={selectedTeam}
@@ -674,6 +770,8 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         {/* Chat Sidebar */}
         <ChatSidebar
           isOpen={sidebarOpen}
+          kyleMode={kyleActive}
+          onExitKyleMode={handleExitKyleMode}
           chapters={chapters}
           onAddChapter={handleAddChapter}
           onRemoveChapter={handleRemoveChapter}
@@ -687,6 +785,16 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           modifiedResult={modifiedTeamResult}
         />
       </div>
+
+      {/* Deep Analysis Modal */}
+      <DeepAnalysisModal
+        open={deepAnalysisOpen}
+        onClose={() => setDeepAnalysisOpen(false)}
+        accentColor={accentColor}
+        selectedTeam={selectedTeam}
+        teams={teams}
+        sensitivityResults={sensitivityResults}
+      />
     </div>
   );
 }

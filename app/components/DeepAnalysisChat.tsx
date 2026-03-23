@@ -1,0 +1,243 @@
+'use client';
+
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { ChatMessage } from '@/lib/chat-types';
+import { Team, SensitivityResult } from '@/lib/types';
+
+interface Props {
+  accentColor: string;
+  selectedTeam: string;
+  teams: Team[];
+  sensitivityResults: SensitivityResult[] | null;
+}
+
+// The full analysis text sent as context for the chat
+const ANALYSIS_CONTEXT = `You are a Premier League football analyst assistant. The user has just read a deep analysis report about Newcastle United's path to European qualification (2025-26 season). You have full knowledge of this analysis and can answer follow-up questions about it.
+
+KEY FACTS FROM THE ANALYSIS:
+- Newcastle are 12th on 42 points with 7 matches remaining
+- They need top 7 for Europe. Gap to 7th (Brentford) is 4 points
+- Current top-7 probability: ~19%
+- The decisive match is Arsenal vs Newcastle (25 April, Emirates)
+  - Newcastle win → ~38% top-7 odds (+19pp)
+  - Draw → ~24% (+5pp)
+  - Newcastle lose → ~11% (-8pp)
+- Tactical angles for Arsenal match: set-piece mismatch, Arsenal's vulnerable left side, Arsenal's late-game drop-off
+- Key risks: Gyökeres in transition, Ødegaard's orchestration, Saka on the ball
+- Key other fixtures: Brentford vs Everton (draw ideal, +4pp), Chelsea vs Man City (Chelsea loss +3pp), Crystal Palace vs Newcastle (must-win)
+- The 50% scenario: Beat Palace + Beat Arsenal + Brentford-Everton draws
+
+Answer questions about any aspect of this analysis. Be specific, cite the numbers from the analysis, and provide additional tactical or statistical insight where relevant. Maintain the pundit-style voice — confident, analytical, direct.
+
+IMPORTANT: This is a conversation about the analysis. Do NOT propose scenario modifications or fixture locks. Just answer questions and provide football analysis.`;
+
+function renderMarkdown(text: string): string {
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`(.+?)`/g, '<code class="bg-white/10 px-1 rounded text-[11px]">$1</code>');
+  return html;
+}
+
+export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sensitivityResults }: Props) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: 'Ask me anything about this analysis — tactical details, specific fixtures, alternative scenarios, or the numbers behind any claim.',
+      timestamp: Date.now(),
+    },
+  ]);
+  const [text, setText] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSend = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || isProcessing) return;
+
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: trimmed,
+      timestamp: Date.now(),
+    };
+
+    setText('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsProcessing(true);
+
+    const thinkingId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: thinkingId, role: 'assistant', content: '', timestamp: Date.now(), isThinking: true },
+    ]);
+
+    try {
+      const conversationMessages = [...messages.filter(m => m.id !== 'welcome'), userMessage].map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: conversationMessages,
+          mode: 'fast',
+          context: {
+            selectedTeam,
+            standings: teams,
+            activeChapters: [],
+            sensitivityResults: sensitivityResults?.slice(0, 10) ?? [],
+            deepAnalysisContext: ANALYSIS_CONTEXT,
+          },
+        }),
+      });
+
+      if (!res.ok) throw new Error('Chat request failed');
+      const data = await res.json();
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === thinkingId
+            ? { ...m, content: data.content ?? data.message ?? 'Sorry, I couldn\'t process that.', isThinking: false }
+            : m
+        )
+      );
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === thinkingId
+            ? { ...m, content: 'Sorry, I couldn\'t process that. Make sure the chat API is configured.', isThinking: false }
+            : m
+        )
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [text, isProcessing, messages, selectedTeam, teams, sensitivityResults]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend]
+  );
+
+  const handleInput = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }, []);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-white/[0.06] shrink-0">
+        <div className="font-oswald text-[11px] tracking-[0.15em] uppercase text-white/40">
+          Ask About This Analysis
+        </div>
+      </div>
+
+      {/* Thread */}
+      <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
+        {messages.map((msg) => {
+          if (msg.isThinking) {
+            return (
+              <div key={msg.id} className="flex justify-start">
+                <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 max-w-[85%]">
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="w-1.5 h-1.5 rounded-full bg-white/30 animate-pulse"
+                        style={{ animationDelay: `${i * 200}ms` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id} className="flex justify-end">
+                <div
+                  className="rounded-xl px-4 py-3 max-w-[85%] text-[12.5px] leading-[1.7] text-white/90"
+                  style={{ background: `${accentColor}20`, border: `1px solid ${accentColor}30` }}
+                >
+                  {msg.content}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={msg.id} className="flex justify-start">
+              <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 max-w-[85%]">
+                <div
+                  className="text-[12.5px] text-white/70 leading-[1.7]"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Input */}
+      <div className="border-t border-white/[0.06] px-3 py-3 shrink-0">
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => { setText(e.target.value); handleInput(); }}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about the analysis..."
+            rows={1}
+            disabled={isProcessing}
+            className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/20 transition-colors disabled:opacity-40"
+            style={{ minHeight: '38px' }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!text.trim() || isProcessing}
+            className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{
+              background: text.trim() && !isProcessing ? `${accentColor}30` : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${text.trim() && !isProcessing ? `${accentColor}40` : 'rgba(255,255,255,0.08)'}`,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path
+                d="M12 7L2 2L4 7L2 12L12 7Z"
+                stroke={text.trim() && !isProcessing ? accentColor : 'rgba(255,255,255,0.3)'}
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

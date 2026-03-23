@@ -20,8 +20,27 @@ export default function SensitivityChart({
   metricLabel,
 }: Props) {
   const top10 = results.slice(0, 10);
-  const maxDelta = Math.max(...top10.map((r) => r.maxAbsDelta), 1);
   const teamName = getTeamName(selectedTeam, teams);
+
+  if (top10.length === 0) {
+    return (
+      <div className="mb-8">
+        <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
+          High-Leverage Fixtures
+        </h2>
+        <p className="text-xs text-white/30 mb-4">
+          Fixtures with the biggest impact on {teamName}&apos;s {metricLabel}. Green
+          = good for {teamName}, red = bad.
+        </p>
+        <div className="border rounded-lg p-4 bg-white/[0.02] border-white/[0.08] text-xs text-white/50">
+          No high-leverage fixtures for this metric right now. The selected outcome is
+          effectively locked, so fixture-by-fixture sensitivity is not informative.
+        </div>
+      </div>
+    );
+  }
+
+  const maxDelta = Math.max(...top10.map((r) => r.maxAbsDelta), 1);
 
   return (
     <div className="mb-8">

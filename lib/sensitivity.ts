@@ -24,6 +24,7 @@ export function sensitivityScan(
   simsPerLock: number = 1000,
   metric: SensitivityMetric = 'top7Pct'
 ): SensitivityResult[] {
+  const EPSILON = 1e-9;
   const scheduledFixtures = fixtures.filter((f) => f.status === 'SCHEDULED');
   const baseline = simulate(teams, fixtures, simsPerLock);
   const baselineValue = getMetricValue(
@@ -76,7 +77,9 @@ export function sensitivityScan(
     });
   }
 
-  return results.sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
+  return results
+    .filter((r) => r.maxAbsDelta > EPSILON)
+    .sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
 }
 
 function getMetricValue(

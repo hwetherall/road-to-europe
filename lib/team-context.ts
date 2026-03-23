@@ -80,13 +80,21 @@ function pickPrimaryMetric(
 ): TeamContext['primaryMetric'] {
   if (!sim) return defaultMetric;
 
+  const EPSILON = 1e-9;
   const isInteresting = (value: number) => value > 0.1 && value < 99.9;
+  const isPossible = (value: number) => value > EPSILON && value < 100 - EPSILON;
   const defaultValue = sim[defaultMetric] as number;
   if (isInteresting(defaultValue)) return defaultMetric;
 
   const fallback = cards.find((card) => isInteresting(sim[card.key] as number));
   if (fallback) {
     return fallback.key as TeamContext['primaryMetric'];
+  }
+
+  // If everything is very close to extremes, still avoid hard 0%/100% when possible.
+  const possibleFallback = cards.find((card) => isPossible(sim[card.key] as number));
+  if (possibleFallback) {
+    return possibleFallback.key as TeamContext['primaryMetric'];
   }
 
   return defaultMetric;
@@ -101,5 +109,14 @@ function filterCards(cards: CardConfig[], sim?: SimulationResult): CardConfig[] 
     return val > 0.1 && val < 99.9;
   });
   if (interesting.length >= 3) return interesting.slice(0, 5);
+
+  // Prefer probabilities that are at least still mathematically possible.
+  const possible = cards.filter((c) => {
+    const val = sim[c.key] as number;
+    return val > 0 && val < 100;
+  });
+  if (possible.length >= 3) return possible.slice(0, 5);
+  if (possible.length > 0) return possible;
+
   return cards.slice(0, 4);
 }

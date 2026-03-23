@@ -622,7 +622,10 @@ export async function POST(req: NextRequest) {
 
     // Build rich context
     const agentCtx = buildAgentContext(context ?? {});
-    const systemPrompt = buildSystemPrompt(mode ?? 'fast', agentCtx);
+    const deepAnalysisContext = context?.deepAnalysisContext as string | undefined;
+    const systemPrompt = deepAnalysisContext
+      ? deepAnalysisContext
+      : buildSystemPrompt(mode ?? 'fast', agentCtx);
 
     // Choose model based on mode
     const model = mode === 'deep' ? 'openai/gpt-5.4' : 'openai/gpt-5.4-mini';

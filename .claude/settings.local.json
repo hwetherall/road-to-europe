@@ -11,7 +11,8 @@
       "Bash(npx create-next-app@latest . --typescript --tailwind --app --eslint --no-import-alias --use-npm --turbopack)",
       "Bash(npx next:*)",
       "Bash(npm run:*)",
-      "WebFetch(domain:the-odds-api.com)"
+      "WebFetch(domain:the-odds-api.com)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

@@ -9,6 +9,8 @@ import { Team, SimulationResult, SensitivityResult } from '@/lib/types';
 
 interface Props {
   isOpen: boolean;
+  kyleMode?: boolean;
+  onExitKyleMode?: () => void;
   chapters: Chapter[];
   onAddChapter: (chapter: Chapter) => void;
   onRemoveChapter: (id: string) => void;
@@ -24,6 +26,8 @@ interface Props {
 
 export default function ChatSidebar({
   isOpen,
+  kyleMode = false,
+  onExitKyleMode,
   chapters,
   onAddChapter,
   onRemoveChapter,
@@ -292,15 +296,31 @@ export default function ChatSidebar({
 
   return (
     <>
-      {/* Mobile backdrop */}
-      <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" />
+      {/* Mobile backdrop (not shown in Kyle mode) */}
+      {!kyleMode && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" />}
 
-      {/* Sidebar */}
-      <div className="fixed top-0 right-0 h-full w-[380px] max-w-full bg-[#0d0d0d] border-l border-white/[0.06] z-50 flex flex-col">
+      {/* Sidebar — fixed 380px normally, flex-1 in Kyle mode */}
+      <div className={
+        kyleMode
+          ? 'flex-1 bg-[#0d0d0d] border-l border-white/[0.06] flex flex-col min-w-0 min-h-0 overflow-hidden'
+          : 'fixed top-0 right-0 h-full w-[380px] max-w-full bg-[#0d0d0d] border-l border-white/[0.06] z-50 flex flex-col'
+      }>
         {/* Header */}
         <div className="px-4 py-3 border-b border-white/[0.06] shrink-0">
-          <div className="font-oswald text-xs tracking-[0.15em] uppercase text-white/50">
-            Scenarios
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-oswald text-xs tracking-[0.15em] uppercase text-white/50">
+              Scenarios
+            </div>
+            {kyleMode && onExitKyleMode && (
+              <button
+                type="button"
+                onClick={onExitKyleMode}
+                className="text-[11px] text-white/60 hover:text-white/90 border border-white/[0.14] hover:border-white/[0.24] rounded px-2 py-1 transition-colors cursor-pointer"
+                title="Exit Kyle mode"
+              >
+                Exit Kyle
+              </button>
+            )}
           </div>
         </div>
 
@@ -344,6 +364,7 @@ export default function ChatSidebar({
           onModeChange={setMode}
           isProcessing={isProcessing}
           accentColor={accentColor}
+          expanded={kyleMode}
         />
       </div>
     </>

@@ -2,40 +2,63 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ChatMessage } from '@/lib/chat-types';
-import { Team, SensitivityResult } from '@/lib/types';
+import { Team, SensitivityResult, DeepAnalysis } from '@/lib/types';
 
 interface Props {
   accentColor: string;
   selectedTeam: string;
   teams: Team[];
   sensitivityResults: SensitivityResult[] | null;
+  analysis: DeepAnalysis;
 }
 
-const QUICK_PROMPTS = [
-  'What swings Arsenal vs Newcastle the most?',
-  'What is the clearest path to 50% top-7 odds?',
-  'Which non-Newcastle fixture has the highest leverage?',
-];
+function buildAnalysisContext(analysis: DeepAnalysis, teamName: string): string {
+  const { stateOfPlay, decisiveMatch, matchesToWatch, bottomLine } = analysis;
+  const metricLabel = analysis.targetMetric.replace('Pct', '').replace('top', 'Top-');
 
-// The full analysis text sent as context for the chat
-const ANALYSIS_CONTEXT = `You are a Premier League football analyst assistant. The user has just read a deep analysis report about Newcastle United's path to European qualification (2025-26 season). You have full knowledge of this analysis and can answer follow-up questions about it.
+  const outcomeTableStr = decisiveMatch.outcomeTable
+    .map((r) => `  - ${r.result}: ${r.resultingOdds.toFixed(1)}% (${r.delta > 0 ? '+' : ''}${r.delta.toFixed(1)}pp)`)
+    .join('\n');
+
+  const risksStr = decisiveMatch.risks.map((r) => `  - ${r}`).join('\n');
+  const anglesStr = decisiveMatch.angles.map((a) => `  - ${a.title}: ${a.analysis}`).join('\n');
+  const watchStr = decisiveMatch.whatToWatch.map((w) => `  - ${w}`).join('\n');
+  const matchesStr = matchesToWatch
+    .map((m) => `  - ${m.homeTeam} vs ${m.awayTeam}: ${m.whyItMatters} (Ideal: ${m.idealResult}, Impact: ${m.simulationImpact})`)
+    .join('\n');
+
+  return `You are a Premier League football analyst assistant. The user has just read a deep analysis report about ${teamName}'s path to European qualification (2025-26 season). You have full knowledge of this analysis and can answer follow-up questions about it.
 
 KEY FACTS FROM THE ANALYSIS:
-- Newcastle are 12th on 42 points with 7 matches remaining
-- They need top 7 for Europe. Gap to 7th (Brentford) is 4 points
-- Current top-7 probability: ~19%
-- The decisive match is Arsenal vs Newcastle (25 April, Emirates)
-  - Newcastle win → ~38% top-7 odds (+19pp)
-  - Draw → ~24% (+5pp)
-  - Newcastle lose → ~11% (-8pp)
-- Tactical angles for Arsenal match: set-piece mismatch, Arsenal's vulnerable left side, Arsenal's late-game drop-off
-- Key risks: Gyökeres in transition, Ødegaard's orchestration, Saka on the ball
-- Key other fixtures: Brentford vs Everton (draw ideal, +4pp), Chelsea vs Man City (Chelsea loss +3pp), Crystal Palace vs Newcastle (must-win)
-- The 50% scenario: Beat Palace + Beat Arsenal + Brentford-Everton draws
+- ${teamName} are ${stateOfPlay.position}th on ${stateOfPlay.points} points with ${stateOfPlay.gamesRemaining} matches remaining
+- They need ${metricLabel} for Europe. Gap: ${stateOfPlay.gapToTarget} points
+- Current ${metricLabel} probability: ~${stateOfPlay.baselineOdds.toFixed(1)}%
+- Optimal path ceiling: ~${stateOfPlay.optimalPathOdds.toFixed(1)}% (plausibility: ${(stateOfPlay.optimalPathPlausibility * 100).toFixed(1)}%)
+
+DECISIVE MATCH: ${decisiveMatch.homeTeam} vs ${decisiveMatch.awayTeam}
+Outcome table:
+${outcomeTableStr}
+
+Key risks:
+${risksStr}
+
+Angles:
+${anglesStr}
+
+What to watch:
+${watchStr}
+
+MATCHES TO WATCH:
+${matchesStr}
+
+BOTTOM LINE:
+${bottomLine.summary}
+Key scenario: ${bottomLine.keyScenario}
 
 Answer questions about any aspect of this analysis. Be specific, cite the numbers from the analysis, and provide additional tactical or statistical insight where relevant. Maintain the pundit-style voice — confident, analytical, direct.
 
 IMPORTANT: This is a conversation about the analysis. Do NOT propose scenario modifications or fixture locks. Just answer questions and provide football analysis.`;
+}
 
 function renderMarkdown(text: string): string {
   let html = text
@@ -49,7 +72,17 @@ function renderMarkdown(text: string): string {
   return html;
 }
 
-export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sensitivityResults }: Props) {
+export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sensitivityResults, analysis }: Props) {
+  const teamName = teams.find((t) => t.abbr === selectedTeam)?.name ?? selectedTeam;
+
+  const QUICK_PROMPTS = [
+    `Why is ${analysis.decisiveMatch.homeTeam} vs ${analysis.decisiveMatch.awayTeam} so decisive?`,
+    `What is the clearest path to ${analysis.targetThreshold}% odds?`,
+    analysis.matchesToWatch[0]
+      ? `Tell me more about ${analysis.matchesToWatch[0].homeTeam} vs ${analysis.matchesToWatch[0].awayTeam}`
+      : 'Which non-team fixture has the highest leverage?',
+  ];
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
@@ -76,7 +109,6 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
     });
   }, []);
 
-  // Auto-scroll on new messages
   useEffect(() => {
     if (threadRef.current) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
@@ -123,7 +155,7 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
             standings: teams,
             activeChapters: [],
             sensitivityResults: sensitivityResults?.slice(0, 10) ?? [],
-            deepAnalysisContext: ANALYSIS_CONTEXT,
+            deepAnalysisContext: buildAnalysisContext(analysis, teamName),
           },
         }),
       });
@@ -149,7 +181,7 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
     } finally {
       setIsProcessing(false);
     }
-  }, [text, isProcessing, messages, selectedTeam, teams, sensitivityResults]);
+  }, [text, isProcessing, messages, selectedTeam, teams, sensitivityResults, analysis, teamName]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -170,14 +202,12 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-white/[0.06] shrink-0">
         <div className="font-oswald text-[11px] tracking-[0.15em] uppercase text-white/40">
           Ask About This Analysis
         </div>
       </div>
 
-      {/* Thread */}
       <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {!hasUserMessages && (
           <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
@@ -241,7 +271,6 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
         })}
       </div>
 
-      {/* Input */}
       <div className="border-t border-white/[0.06] px-3 py-3 shrink-0">
         <div className="flex items-end gap-2">
           <textarea

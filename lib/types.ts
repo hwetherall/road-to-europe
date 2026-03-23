@@ -81,3 +81,107 @@ export interface WhatIfState {
   baseResult: SimulationResult | null;
   whatIfResult: SimulationResult | null;
 }
+
+// ── V4: Path Search Types ──
+
+export interface PathSearchConfig {
+  teams: Team[];
+  fixtures: Fixture[];
+  targetTeam: string;
+  targetMetric: keyof SimulationResult;
+  targetThreshold: number;
+  maxFixturesToLock: number;
+  branchDepth: number;
+}
+
+export interface FixtureLock {
+  fixtureId: string;
+  homeTeam: string;
+  awayTeam: string;
+  result: 'home' | 'draw' | 'away';
+  resultLabel: string;
+  individualPlausibility: number;
+}
+
+export interface CandidatePath {
+  id: string;
+  locks: FixtureLock[];
+  resultingOdds: number;
+  baselineOdds: number;
+  delta: number;
+  compositePlausibility: number;
+  crossesThreshold: boolean;
+  locksInvolvingTarget: number;
+  locksInvolvingRivals: number;
+}
+
+export interface PathSearchResult {
+  config: PathSearchConfig;
+  baselineOdds: number;
+  optimalPath: CandidatePath;
+  candidatePaths: CandidatePath[];
+  sensitivityData: SensitivityResult[];
+  searchStats: {
+    totalSimulations: number;
+    totalPaths: number;
+    pathsFiltered: number;
+    searchTimeMs: number;
+  };
+}
+
+// ── V4: Deep Analysis Output ──
+
+export interface DeepAnalysis {
+  id: string;
+  generatedAt: number;
+  targetTeam: string;
+  targetMetric: string;
+  targetThreshold: number;
+
+  stateOfPlay: {
+    position: number;
+    points: number;
+    gapToTarget: number;
+    gamesRemaining: number;
+    baselineOdds: number;
+    optimalPathOdds: number;
+    optimalPathPlausibility: number;
+    contextNarrative: string;
+  };
+
+  decisiveMatch: {
+    fixtureId: string;
+    homeTeam: string;
+    awayTeam: string;
+    date: string;
+    outcomeTable: {
+      result: string;
+      resultingOdds: number;
+      delta: number;
+    }[];
+    risks: string[];
+    angles: {
+      title: string;
+      analysis: string;
+    }[];
+    whatToWatch: string[];
+  };
+
+  matchesToWatch: {
+    fixtureId: string;
+    homeTeam: string;
+    awayTeam: string;
+    whyItMatters: string;
+    idealResult: string;
+    whyItsPlausible: string;
+    simulationImpact: string;
+  }[];
+
+  bottomLine: {
+    summary: string;
+    keyScenario: string;
+  };
+
+  sources: string[];
+  searchBudgetUsed: number;
+}

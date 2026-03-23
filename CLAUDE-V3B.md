@@ -165,7 +165,7 @@ async function handleChat(messages, mode, context) {
   
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await callOpenRouter({
-      model: 'openai/gpt-5.4',  // or preferred model
+      model: 'anthropic/claude-opus-4.6',  // or preferred model
       messages: conversation,
       tools: TOOLS,
     });
@@ -207,7 +207,7 @@ async function handleChat(messages, mode, context) {
   });
   
   const finalResponse = await callOpenRouter({
-    model: 'openai/gpt-5.4',
+    model: 'anthropic/claude-opus-4.6',
     messages: conversation,
     tools: [],  // No more tools — force a text response
   });

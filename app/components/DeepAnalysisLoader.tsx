@@ -4,16 +4,29 @@ import { useState, useEffect } from 'react';
 
 interface Props {
   accentColor: string;
+  teamName: string;
   onComplete: () => void;
+  isReal?: boolean;
 }
 
 const STAGES = [
-  { label: 'Scanning remaining fixtures', duration: 1200, icon: 'scan' },
-  { label: 'Running 50,000 scenario combinations', duration: 1800, icon: 'sim' },
-  { label: 'Identifying high-leverage matchups', duration: 1400, icon: 'target' },
-  { label: 'Researching tactical matchups & form', duration: 2000, icon: 'search' },
-  { label: 'Composing analysis', duration: 1000, icon: 'write' },
+  { label: 'Running baseline simulation (10,000 seasons)', duration: 2000, icon: 'sim' },
+  { label: 'Scanning fixture sensitivity (15 fixtures × 3 outcomes)', duration: 3000, icon: 'scan' },
+  { label: 'Searching for optimal scenario paths', duration: 4000, icon: 'target' },
+  { label: 'Branching at decision points', duration: 3000, icon: 'sim' },
+  { label: 'Researching teams and tactical matchups', duration: 8000, icon: 'search' },
+  { label: 'Composing analysis', duration: 5000, icon: 'write' },
 ] as const;
+
+const REAL_MODE_TARGET_MS = 7 * 60 * 1000;
+const REAL_STAGE_WEIGHTS = [14, 18, 20, 14, 22, 12] as const; // sums to 100
+
+function formatClock(ms: number): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutesPart = Math.floor(seconds / 60);
+  const secondsPart = seconds % 60;
+  return `${minutesPart}:${secondsPart.toString().padStart(2, '0')}`;
+}
 
 function StageIcon({ icon, active }: { icon: string; active: boolean }) {
   const color = active ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.2)';
@@ -62,23 +75,57 @@ function StageIcon({ icon, active }: { icon: string; active: boolean }) {
   }
 }
 
-export default function DeepAnalysisLoader({ accentColor, onComplete }: Props) {
+export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, isReal }: Props) {
   const [currentStage, setCurrentStage] = useState(0);
   const [stageProgress, setStageProgress] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
+  const [remainingMs, setRemainingMs] = useState(REAL_MODE_TARGET_MS);
 
   useEffect(() => {
-    const totalDuration = STAGES.reduce((sum, s) => sum + s.duration, 0);
-    let elapsed = 0;
+    if (!isReal) {
+      // Original fake timer mode
+      const totalDuration = STAGES.reduce((sum, s) => sum + s.duration, 0);
+      let elapsed = 0;
+      let stageIdx = 0;
+      let stageElapsed = 0;
+
+      const interval = setInterval(() => {
+        elapsed += 30;
+        stageElapsed += 30;
+
+        if (stageIdx < STAGES.length && stageElapsed >= STAGES[stageIdx].duration) {
+          stageIdx++;
+          stageElapsed = 0;
+          setCurrentStage(stageIdx);
+        }
+
+        if (stageIdx < STAGES.length) {
+          setStageProgress(Math.min((stageElapsed / STAGES[stageIdx].duration) * 100, 100));
+        }
+
+        setOverallProgress(Math.min((elapsed / totalDuration) * 100, 100));
+
+        if (elapsed >= totalDuration) {
+          clearInterval(interval);
+          setTimeout(onComplete, 400);
+        }
+      }, 30);
+
+      return () => clearInterval(interval);
+    }
+
+    // Real mode: pace loader against a 7-minute budget while API works
+    const realStageDurations = REAL_STAGE_WEIGHTS.map((weight) => (REAL_MODE_TARGET_MS * weight) / 100);
     let stageIdx = 0;
     let stageElapsed = 0;
+    let totalElapsed = 0;
 
     const interval = setInterval(() => {
-      elapsed += 30;
-      stageElapsed += 30;
+      totalElapsed += 100;
+      stageElapsed += 100;
+      setRemainingMs(Math.max(REAL_MODE_TARGET_MS - totalElapsed, 0));
 
-      // Check if we should advance to next stage
-      if (stageIdx < STAGES.length && stageElapsed >= STAGES[stageIdx].duration) {
+      if (stageIdx < STAGES.length - 1 && stageElapsed >= realStageDurations[stageIdx]) {
         stageIdx++;
         stageElapsed = 0;
         setCurrentStage(stageIdx);
@@ -86,20 +133,28 @@ export default function DeepAnalysisLoader({ accentColor, onComplete }: Props) {
 
       // Stage progress
       if (stageIdx < STAGES.length) {
-        setStageProgress(Math.min((stageElapsed / STAGES[stageIdx].duration) * 100, 100));
+        const dur = realStageDurations[stageIdx];
+        if (stageIdx < STAGES.length - 1) {
+          setStageProgress(Math.min((stageElapsed / dur) * 100, 100));
+        } else {
+          // Last stage: ease to 92% by seven minutes, then pulse while waiting
+          if (totalElapsed <= REAL_MODE_TARGET_MS) {
+            const stagePct = Math.min((stageElapsed / dur) * 100, 92);
+            setStageProgress(stagePct);
+          } else {
+            const phase = ((totalElapsed - REAL_MODE_TARGET_MS) % 5000) / 5000;
+            setStageProgress(84 + Math.sin(phase * Math.PI) * 8);
+          }
+        }
       }
 
-      // Overall progress
-      setOverallProgress(Math.min((elapsed / totalDuration) * 100, 100));
-
-      if (elapsed >= totalDuration) {
-        clearInterval(interval);
-        setTimeout(onComplete, 400);
-      }
-    }, 30);
+      // Overall: approach 95% over 7 minutes, then hold until API completes
+      const elapsedRatio = Math.min(totalElapsed / REAL_MODE_TARGET_MS, 1);
+      setOverallProgress(10 + elapsedRatio * 85);
+    }, 100);
 
     return () => clearInterval(interval);
-  }, [onComplete]);
+  }, [onComplete, isReal]);
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#050505] flex items-center justify-center">
@@ -119,7 +174,7 @@ export default function DeepAnalysisLoader({ accentColor, onComplete }: Props) {
             Deep Analysis
           </div>
           <div className="text-[12px] text-white/30 mt-2">
-            Newcastle&apos;s path to Europe
+            Analyzing {teamName}&apos;s season scenarios
           </div>
         </div>
 
@@ -185,7 +240,11 @@ export default function DeepAnalysisLoader({ accentColor, onComplete }: Props) {
           />
         </div>
         <div className="text-center mt-3 text-[10px] text-white/20 tracking-wider">
-          {Math.round(overallProgress)}%
+          {isReal
+            ? remainingMs > 0
+              ? `Estimated time remaining ${formatClock(remainingMs)}`
+              : 'Finalizing analysis...'
+            : `${Math.round(overallProgress)}%`}
         </div>
       </div>
     </div>

@@ -636,18 +636,16 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 onToggle={handleKyleToggle}
                 accentColor={accentColor}
               />
-              {selectedTeam === 'NEW' && (
-                <button
-                  onClick={() => setDeepAnalysisOpen(true)}
-                  className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/50 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
-                >
-                  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                    <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
-                    <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Deep Analysis
-                </button>
-              )}
+              <button
+                onClick={() => setDeepAnalysisOpen(true)}
+                className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/50 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
+              >
+                <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                  <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Deep Analysis
+              </button>
             </div>
 
             {running && phase && (
@@ -791,9 +789,12 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         open={deepAnalysisOpen}
         onClose={() => setDeepAnalysisOpen(false)}
         accentColor={accentColor}
+        textAccentColor={textColor}
         selectedTeam={selectedTeam}
         teams={teams}
+        fixtures={allFixtures}
         sensitivityResults={sensitivityResults}
+        sensitivityMetric={sensitivityMetric}
       />
     </div>
   );

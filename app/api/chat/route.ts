@@ -628,7 +628,7 @@ export async function POST(req: NextRequest) {
       : buildSystemPrompt(mode ?? 'fast', agentCtx);
 
     // Choose model based on mode
-    const model = mode === 'deep' ? 'openai/gpt-5.4' : 'openai/gpt-5.4-mini';
+    const model = mode === 'deep' ? 'anthropic/claude-opus-4.6' : 'anthropic/claude-opus-4.6-mini';
 
     const MAX_TOOL_ROUNDS = mode === 'deep' ? 8 : 2;
     const toolCallLog: Array<{ id: string; query: string; status: 'complete' | 'error' }> = [];

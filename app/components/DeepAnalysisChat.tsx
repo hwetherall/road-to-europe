@@ -11,6 +11,12 @@ interface Props {
   sensitivityResults: SensitivityResult[] | null;
 }
 
+const QUICK_PROMPTS = [
+  'What swings Arsenal vs Newcastle the most?',
+  'What is the clearest path to 50% top-7 odds?',
+  'Which non-Newcastle fixture has the highest leverage?',
+];
+
 // The full analysis text sent as context for the chat
 const ANALYSIS_CONTEXT = `You are a Premier League football analyst assistant. The user has just read a deep analysis report about Newcastle United's path to European qualification (2025-26 season). You have full knowledge of this analysis and can answer follow-up questions about it.
 
@@ -39,6 +45,7 @@ function renderMarkdown(text: string): string {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
   html = html.replace(/`(.+?)`/g, '<code class="bg-white/10 px-1 rounded text-[11px]">$1</code>');
+  html = html.replace(/\n/g, '<br />');
   return html;
 }
 
@@ -55,6 +62,19 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
   const [isProcessing, setIsProcessing] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasUserMessages = messages.some((m) => m.role === 'user' || m.isThinking);
+
+  const primeInput = useCallback((value: string) => {
+    setText(value);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+    });
+  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -159,6 +179,23 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
 
       {/* Thread */}
       <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
+        {!hasUserMessages && (
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+            <div className="text-[9px] tracking-[0.12em] uppercase text-white/35 mb-2">Quick Prompts</div>
+            <div className="grid gap-2">
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  className="text-left text-[11px] text-white/70 hover:text-white transition-colors border border-white/[0.06] rounded-lg px-2.5 py-2 bg-black/20 hover:bg-black/30"
+                  onClick={() => primeInput(prompt)}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {messages.map((msg) => {
           if (msg.isThinking) {
             return (

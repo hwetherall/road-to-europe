@@ -7,7 +7,7 @@
 
 ## THE STATE OF PLAY
 
-Newcastle sit **12th on 42 points** with 7 matches remaining. European qualification (top 7) requires overhauling Brentford (7th, 46pts) and ideally Everton (8th, 46pts) — a gap of 4 points with 21 still available. It's tight but it's not comfortable: Newcastle need to win at least 5 of their remaining 7, and they need help.
+Newcastle sit **12th on 42 points** with 7 matches remaining. European qualification (top 7) requires overhauling Brentford (7th, 46pts) and Everton (8th, 46pts) — a gap of 4 points with 21 still available. It's tight but it's not comfortable: Newcastle need to win at least 5 of their remaining 7, and they need help.
 
 The simulation gives Newcastle a **~19% chance of finishing in the top 7** under current bookmaker probabilities. Not great. Not impossible. Here's what needs to happen to push that past 50%.
 

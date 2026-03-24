@@ -210,7 +210,7 @@ function RiskCard({ title, children, threat }: { title: string; children: React.
           {threat} threat
         </span>
       </div>
-      <div className="text-[12px] text-white/50 leading-[1.7] pl-[22px]">
+      <div className="text-[14px] text-white/55 leading-[1.75] pl-[22px]">
         {children}
       </div>
     </div>
@@ -231,8 +231,8 @@ function FixtureCard({ title, why, detail, impact, accent, textAccent }: {
         {title}
       </div>
       <div className="text-[10px] tracking-[0.1em] uppercase text-white/30 mb-2">Why it matters</div>
-      <div className="text-[12.5px] text-white/55 leading-[1.7] mb-3">{why}</div>
-      {detail && <div className="text-[12.5px] text-white/50 leading-[1.7] mb-3">{detail}</div>}
+      <div className="text-[14px] text-white/60 leading-[1.75] mb-3">{why}</div>
+      {detail && <div className="text-[14px] text-white/55 leading-[1.75] mb-3">{detail}</div>}
       <div
         className="text-[11px] px-3 py-2 rounded-lg leading-[1.6]"
         style={{ background: `${accent}08`, border: `1px solid ${accent}20`, color: textAccent }}
@@ -252,7 +252,7 @@ function WatchItem({ children }: { children: React.ReactNode }) {
           <circle cx="5" cy="5" r="1" fill="rgba(255,255,255,0.4)" />
         </svg>
       </div>
-      <div className="text-[12.5px] text-white/55 leading-[1.7]">{children}</div>
+      <div className="text-[14px] text-white/60 leading-[1.75]">{children}</div>
     </div>
   );
 }
@@ -325,7 +325,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
         <h1 className="font-oswald text-[26px] lg:text-[32px] font-bold tracking-wide leading-tight text-white/95">
           {getHeroQuestion(analysis.targetMetric, teamName)}
         </h1>
-        <div className="text-[12px] text-white/30 mt-3">
+        <div className="text-[13px] text-white/35 mt-3">
           Based on {analysis.searchBudgetUsed > 0 ? `${analysis.searchBudgetUsed} web searches + ` : ''}10,000 Monte Carlo simulations &middot; {new Date(analysis.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
         </div>
       </div>
@@ -364,7 +364,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
           />
         </div>
 
-        <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 text-[13px] text-white/55 leading-[1.8]">
+        <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 text-[15px] text-white/65 leading-[1.85]">
           {stateOfPlay.contextNarrative.split('\n').filter(Boolean).map((para, i) => (
             <p key={i} className={i > 0 ? 'mt-3' : ''}>{para}</p>
           ))}
@@ -380,7 +380,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
               The Optimal Path
             </div>
           </div>
-          <div className="text-[12.5px] text-white/50 leading-[1.75]">
+          <div className="text-[14px] text-white/60 leading-[1.8]">
             {isRelegation ? (
               <>
                 In the best-case scenario, {teamName}&apos;s relegation risk drops to{' '}
@@ -415,15 +415,15 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             The Decisive Match
           </div>
           <div className="text-center mb-6">
-            <div className="font-oswald text-[22px] font-bold text-white/90 tracking-wide">
+            <div className="font-oswald text-[24px] font-bold text-white/90 tracking-wide">
               {decisiveMatch.homeTeam} vs {decisiveMatch.awayTeam}
             </div>
             {decisiveMatch.date && (
-              <div className="text-[12px] text-white/35 mt-1">{formatDate(decisiveMatch.date)}</div>
+              <div className="text-[13px] text-white/40 mt-1">{formatDate(decisiveMatch.date)}</div>
             )}
           </div>
 
-          <div className="text-[13px] text-white/55 leading-[1.8] mb-6">
+          <div className="text-[15px] text-white/65 leading-[1.85] mb-6">
             This is the match that moves the needle the most. The simulation is unambiguous: no other single
             fixture has as much impact on {teamName}&apos;s odds.
           </div>
@@ -510,7 +510,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
           <div className="font-oswald text-[11px] tracking-[0.2em] uppercase text-white/35 mb-2 text-center">
             Matches to Watch
           </div>
-          <div className="text-center text-[12px] text-white/30 mb-6">
+          <div className="text-center text-[13px] text-white/35 mb-6">
             Fixtures that move the needle on {teamName}&apos;s odds
           </div>
 
@@ -545,7 +545,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             borderColor: `${accentColor}20`,
           }}
         >
-          <div className="text-[13.5px] text-white/65 leading-[1.85]">
+          <div className="text-[15px] text-white/70 leading-[1.9]">
             {bottomLine.summary.split('\n').filter(Boolean).map((para, i) => (
               <p key={i} className={i > 0 ? 'mt-3' : ''}>{para}</p>
             ))}
@@ -569,7 +569,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             <div className="text-[10px] tracking-[0.15em] uppercase text-white/30 mb-2">
               The Scenario to Build Towards
             </div>
-            <div className="text-[13.5px] text-white/70 leading-[1.8]">
+            <div className="text-[15px] text-white/75 leading-[1.85]">
               {bottomLine.keyScenario}
             </div>
           </div>

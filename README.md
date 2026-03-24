@@ -71,3 +71,20 @@ This creates `public.deep_analysis_reports` and indexes needed for scenario look
 - Cache hit: returns saved report (`cacheStatus: hit`) in seconds.
 - Cache miss: generates report, stores it, returns (`cacheStatus: miss`).
 - Force refresh: generates fresh report and updates saved record (`cacheStatus: refreshed`).
+
+### 4) Retention cleanup
+
+Run:
+
+`supabase/migrations/20260323_deep_analysis_retention.sql`
+
+This adds:
+
+- `public.prune_old_deep_analysis_reports(retention_days integer default 30)`
+- A daily cleanup job at `03:15` (when `pg_cron` is available), pruning rows older than 30 days.
+
+If your project cannot create scheduled jobs automatically, you can still call the function manually:
+
+```sql
+select public.prune_old_deep_analysis_reports(30);
+```

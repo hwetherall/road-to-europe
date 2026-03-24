@@ -58,6 +58,7 @@ export default function DeepAnalysisModal({
   const [error, setError] = useState<string>('');
   const [warning, setWarning] = useState<string>('');
   const [cacheStatus, setCacheStatus] = useState<'hit' | 'miss' | 'refreshed' | ''>('');
+  const [cacheMatchType, setCacheMatchType] = useState<'exact' | 'scenario_fallback' | ''>('');
   const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [cacheEnabled, setCacheEnabled] = useState<boolean>(true);
   const [loaderVariant, setLoaderVariant] = useState<'cached' | 'fresh'>('fresh');
@@ -97,6 +98,7 @@ export default function DeepAnalysisModal({
       setError('');
       setWarning('');
       setCacheStatus('');
+      setCacheMatchType('');
       setCachedAt(null);
       setCacheEnabled(true);
       setLoaderVariant('fresh');
@@ -119,6 +121,7 @@ export default function DeepAnalysisModal({
     setError('');
     setWarning('');
     setCacheStatus('');
+    setCacheMatchType('');
     setCachedAt(null);
     setLoaderVariant('fresh');
 
@@ -191,6 +194,11 @@ export default function DeepAnalysisModal({
       setCacheStatus(
         data.cacheStatus === 'hit' || data.cacheStatus === 'miss' || data.cacheStatus === 'refreshed'
           ? data.cacheStatus
+          : ''
+      );
+      setCacheMatchType(
+        data.cacheMatchType === 'exact' || data.cacheMatchType === 'scenario_fallback'
+          ? data.cacheMatchType
           : ''
       );
       setCachedAt(typeof data.cachedAt === 'number' ? data.cachedAt : null);
@@ -382,6 +390,16 @@ export default function DeepAnalysisModal({
           {cacheStatus === 'hit' && (
             <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-200/90">
               Cached
+            </span>
+          )}
+          {cacheStatus === 'hit' && cacheMatchType === 'exact' && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-200/90">
+              Exact cache
+            </span>
+          )}
+          {cacheStatus === 'hit' && cacheMatchType === 'scenario_fallback' && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-amber-300/30 bg-amber-300/10 text-amber-200/90">
+              Scenario cache
             </span>
           )}
           {cacheStatus === 'refreshed' && (

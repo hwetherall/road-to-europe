@@ -329,7 +329,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             label="Position"
             value={formatOrdinal(stateOfPlay.position)}
             sub={`${stateOfPlay.points} points`}
-            accent={accentColor}
+            accent={textAccentColor}
           />
           <StatPill
             label={getGapLabel(analysis.targetMetric, metricLabel)}
@@ -346,7 +346,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             label={`${metricLabel} odds`}
             value={`~${stateOfPlay.baselineOdds.toFixed(0)}%`}
             sub="current baseline"
-            accent={accentColor}
+            accent={textAccentColor}
           />
         </div>
 
@@ -362,7 +362,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
           style={{ background: `${accentColor}06`, borderColor: `${accentColor}18` }}
         >
           <div className="flex items-center gap-2 mb-2">
-            <div className="font-oswald text-[11px] tracking-[0.15em] uppercase" style={{ color: `${accentColor}aa` }}>
+            <div className="font-oswald text-[11px] tracking-[0.15em] uppercase" style={{ color: `${textAccentColor}cc` }}>
               The Optimal Path
             </div>
           </div>
@@ -370,7 +370,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             {isRelegation ? (
               <>
                 In the best-case scenario, {teamName}&apos;s relegation risk drops to{' '}
-                <strong className="font-oswald" style={{ color: accentColor }}>
+                <strong className="font-oswald" style={{ color: textAccentColor }}>
                   ~{stateOfPlay.optimalPathOdds.toFixed(0)}%
                 </strong> — effectively safe. But the probability of all those results landing together is roughly{' '}
                 <strong className="text-white/70">
@@ -380,7 +380,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             ) : (
               <>
                 In the best-case scenario, {metricLabel} odds rise to{' '}
-                <strong className="font-oswald" style={{ color: accentColor }}>
+                <strong className="font-oswald" style={{ color: textAccentColor }}>
                   ~{stateOfPlay.optimalPathOdds.toFixed(0)}%
                 </strong>. But the probability of all those results landing together is roughly{' '}
                 <strong className="text-white/70">
@@ -464,7 +464,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
               </div>
               <div className="space-y-4 mb-8">
                 {decisiveMatch.angles.map((angle, i) => (
-                  <TacticalCard key={i} num={i + 1} title={angle.title} accent={accentColor}>
+                  <TacticalCard key={i} num={i + 1} title={angle.title} accent={textAccentColor}>
                     {angle.analysis}
                   </TacticalCard>
                 ))}
@@ -540,7 +540,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
           <div className="my-5 h-px" style={{ background: `${accentColor}15` }} />
 
           <ScenarioPathway
-            accent={accentColor}
+            accent={textAccentColor}
             bestPath={bestPath}
             baselineOdds={stateOfPlay.baselineOdds}
           />

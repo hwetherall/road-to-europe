@@ -317,7 +317,7 @@ export default function DeepAnalysisModal({
                           </span>
                           <span
                             className="font-oswald text-[13px] tracking-wide"
-                            style={{ color: isSelected ? accentColor : 'rgba(255,255,255,0.55)' }}
+                            style={{ color: isSelected ? textAccentColor : 'rgba(255,255,255,0.55)' }}
                           >
                             {formatMetricPct(opt.pct)}
                           </span>
@@ -342,7 +342,7 @@ export default function DeepAnalysisModal({
               style={{
                 background: `linear-gradient(135deg, ${accentColor}40, ${accentColor}20)`,
                 border: `1px solid ${accentColor}50`,
-                color: accentColor,
+                color: textAccentColor,
                 opacity: hasMetricOptions ? 1 : 0.45,
               }}
             >
@@ -413,7 +413,7 @@ export default function DeepAnalysisModal({
         <div className="flex items-center gap-3">
           <div
             className="w-6 h-6 rounded flex items-center justify-center font-oswald text-[9px] font-bold"
-            style={{ background: `${accentColor}25`, color: accentColor }}
+            style={{ background: `${accentColor}25`, color: textAccentColor }}
           >
             {selectedTeam}
           </div>

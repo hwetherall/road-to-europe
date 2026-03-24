@@ -15,48 +15,9 @@ import {
   SensitivityResult,
   CandidatePath,
 } from '@/lib/types';
+import { executeWebSearch } from '@/lib/web-search';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
-
-// ── Search Execution (reused from chat route) ──
-
-async function executeWebSearch(query: string): Promise<string> {
-  if (TAVILY_API_KEY) {
-    try {
-      const response = await fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: TAVILY_API_KEY,
-          query,
-          search_depth: 'basic',
-          max_results: 5,
-          include_answer: true,
-        }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const parts: string[] = [];
-        if (data.answer) parts.push(`Summary: ${data.answer}`);
-        if (data.results?.length) {
-          const snippets = data.results
-            .slice(0, 3)
-            .map((r: { title?: string; content?: string; url?: string }) => {
-              const content = r.content?.slice(0, 250) ?? '';
-              return `- ${r.title ?? 'Result'}: ${content}${r.url ? ` [${r.url}]` : ''}`;
-            })
-            .join('\n');
-          parts.push(`\nTop results:\n${snippets}`);
-        }
-        return parts.join('\n') || 'No results found.';
-      }
-    } catch (e) {
-      console.error('Tavily search failed:', e);
-    }
-  }
-  return '[Search unavailable — no TAVILY_API_KEY configured.]';
-}
 
 // ── OpenRouter Call ──
 

@@ -649,7 +649,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             </div>
 
             {running && phase && (
-              <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${accentColor}aa` }}>
+              <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${textColor}cc` }}>
                 <div
                   className="w-4 h-4 border-2 rounded-full animate-spin"
                   style={{ borderColor: `${accentColor}33`, borderTopColor: accentColor }}

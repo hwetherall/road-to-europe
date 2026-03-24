@@ -7,9 +7,10 @@ interface Props {
   teamName: string;
   onComplete: () => void;
   isReal?: boolean;
+  variant?: 'cached' | 'fresh';
 }
 
-const STAGES = [
+const FRESH_STAGES = [
   { label: 'Running baseline simulation (10,000 seasons)', duration: 2000, icon: 'sim' },
   { label: 'Scanning fixture sensitivity (15 fixtures × 3 outcomes)', duration: 3000, icon: 'scan' },
   { label: 'Searching for optimal scenario paths', duration: 4000, icon: 'target' },
@@ -18,7 +19,17 @@ const STAGES = [
   { label: 'Composing analysis', duration: 5000, icon: 'write' },
 ] as const;
 
-const REAL_MODE_TARGET_MS = 7 * 60 * 1000;
+const CACHED_STAGES = [
+  { label: 'Loading saved scenario signature', duration: 1500, icon: 'scan' },
+  { label: 'Fetching cached report from database', duration: 2000, icon: 'search' },
+  { label: 'Hydrating report sections', duration: 2500, icon: 'target' },
+  { label: 'Restoring tactical insights and paths', duration: 2000, icon: 'sim' },
+  { label: 'Validating fixture snapshot', duration: 1000, icon: 'scan' },
+  { label: 'Finalizing deep analysis view', duration: 1000, icon: 'write' },
+] as const;
+
+const FRESH_MODE_TARGET_MS = 7 * 60 * 1000;
+const CACHED_MODE_TARGET_MS = 10 * 1000;
 const REAL_STAGE_WEIGHTS = [14, 18, 20, 14, 22, 12] as const; // sums to 100
 
 function formatClock(ms: number): string {
@@ -75,16 +86,31 @@ function StageIcon({ icon, active }: { icon: string; active: boolean }) {
   }
 }
 
-export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, isReal }: Props) {
+export default function DeepAnalysisLoader({
+  accentColor,
+  teamName,
+  onComplete,
+  isReal,
+  variant = 'fresh',
+}: Props) {
+  const stages = variant === 'cached' ? CACHED_STAGES : FRESH_STAGES;
+  const realTargetMs = variant === 'cached' ? CACHED_MODE_TARGET_MS : FRESH_MODE_TARGET_MS;
   const [currentStage, setCurrentStage] = useState(0);
   const [stageProgress, setStageProgress] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
-  const [remainingMs, setRemainingMs] = useState(REAL_MODE_TARGET_MS);
+  const [remainingMs, setRemainingMs] = useState(realTargetMs);
+
+  useEffect(() => {
+    setCurrentStage(0);
+    setStageProgress(0);
+    setOverallProgress(0);
+    setRemainingMs(realTargetMs);
+  }, [variant, realTargetMs]);
 
   useEffect(() => {
     if (!isReal) {
       // Original fake timer mode
-      const totalDuration = STAGES.reduce((sum, s) => sum + s.duration, 0);
+      const totalDuration = stages.reduce((sum, s) => sum + s.duration, 0);
       let elapsed = 0;
       let stageIdx = 0;
       let stageElapsed = 0;
@@ -93,14 +119,14 @@ export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, 
         elapsed += 30;
         stageElapsed += 30;
 
-        if (stageIdx < STAGES.length && stageElapsed >= STAGES[stageIdx].duration) {
+        if (stageIdx < stages.length && stageElapsed >= stages[stageIdx].duration) {
           stageIdx++;
           stageElapsed = 0;
           setCurrentStage(stageIdx);
         }
 
-        if (stageIdx < STAGES.length) {
-          setStageProgress(Math.min((stageElapsed / STAGES[stageIdx].duration) * 100, 100));
+        if (stageIdx < stages.length) {
+          setStageProgress(Math.min((stageElapsed / stages[stageIdx].duration) * 100, 100));
         }
 
         setOverallProgress(Math.min((elapsed / totalDuration) * 100, 100));
@@ -114,8 +140,8 @@ export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, 
       return () => clearInterval(interval);
     }
 
-    // Real mode: pace loader against a 7-minute budget while API works
-    const realStageDurations = REAL_STAGE_WEIGHTS.map((weight) => (REAL_MODE_TARGET_MS * weight) / 100);
+    // Real mode: pace loader against either short cached or long fresh budget
+    const realStageDurations = REAL_STAGE_WEIGHTS.map((weight) => (realTargetMs * weight) / 100);
     let stageIdx = 0;
     let stageElapsed = 0;
     let totalElapsed = 0;
@@ -123,38 +149,38 @@ export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, 
     const interval = setInterval(() => {
       totalElapsed += 100;
       stageElapsed += 100;
-      setRemainingMs(Math.max(REAL_MODE_TARGET_MS - totalElapsed, 0));
+      setRemainingMs(Math.max(realTargetMs - totalElapsed, 0));
 
-      if (stageIdx < STAGES.length - 1 && stageElapsed >= realStageDurations[stageIdx]) {
+      if (stageIdx < stages.length - 1 && stageElapsed >= realStageDurations[stageIdx]) {
         stageIdx++;
         stageElapsed = 0;
         setCurrentStage(stageIdx);
       }
 
       // Stage progress
-      if (stageIdx < STAGES.length) {
+      if (stageIdx < stages.length) {
         const dur = realStageDurations[stageIdx];
-        if (stageIdx < STAGES.length - 1) {
+        if (stageIdx < stages.length - 1) {
           setStageProgress(Math.min((stageElapsed / dur) * 100, 100));
         } else {
-          // Last stage: ease to 92% by seven minutes, then pulse while waiting
-          if (totalElapsed <= REAL_MODE_TARGET_MS) {
+          // Last stage: ease to 92% by target duration, then pulse while waiting
+          if (totalElapsed <= realTargetMs) {
             const stagePct = Math.min((stageElapsed / dur) * 100, 92);
             setStageProgress(stagePct);
           } else {
-            const phase = ((totalElapsed - REAL_MODE_TARGET_MS) % 5000) / 5000;
+            const phase = ((totalElapsed - realTargetMs) % 5000) / 5000;
             setStageProgress(84 + Math.sin(phase * Math.PI) * 8);
           }
         }
       }
 
-      // Overall: approach 95% over 7 minutes, then hold until API completes
-      const elapsedRatio = Math.min(totalElapsed / REAL_MODE_TARGET_MS, 1);
+      // Overall: approach 95% over target duration, then hold until API completes
+      const elapsedRatio = Math.min(totalElapsed / realTargetMs, 1);
       setOverallProgress(10 + elapsedRatio * 85);
     }, 100);
 
     return () => clearInterval(interval);
-  }, [onComplete, isReal]);
+  }, [onComplete, isReal, stages, realTargetMs]);
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#050505] flex items-center justify-center">
@@ -180,7 +206,7 @@ export default function DeepAnalysisLoader({ accentColor, teamName, onComplete, 
 
         {/* Stages */}
         <div className="space-y-4 mb-10">
-          {STAGES.map((stage, i) => {
+          {stages.map((stage, i) => {
             const isActive = i === currentStage;
             const isDone = i < currentStage;
             const isPending = i > currentStage;

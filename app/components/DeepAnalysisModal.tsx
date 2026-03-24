@@ -60,6 +60,7 @@ export default function DeepAnalysisModal({
   const [cacheStatus, setCacheStatus] = useState<'hit' | 'miss' | 'refreshed' | ''>('');
   const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [cacheEnabled, setCacheEnabled] = useState<boolean>(true);
+  const [loaderVariant, setLoaderVariant] = useState<'cached' | 'fresh'>('fresh');
   const [targetMetric, setTargetMetric] = useState<string>(sensitivityMetric);
   const [targetThreshold, setTargetThreshold] = useState(50);
   const abortRef = useRef<AbortController | null>(null);
@@ -98,6 +99,7 @@ export default function DeepAnalysisModal({
       setCacheStatus('');
       setCachedAt(null);
       setCacheEnabled(true);
+      setLoaderVariant('fresh');
       setTargetMetric(sensitivityMetric);
     } else {
       // Abort any in-flight request
@@ -114,24 +116,56 @@ export default function DeepAnalysisModal({
   }, [open, targetMetric, metricOptions, hasMetricOptions]);
 
   const handleGenerate = useCallback(async (forceRefresh = false) => {
-    setPhase('loading');
     setError('');
     setWarning('');
     setCacheStatus('');
     setCachedAt(null);
+    setLoaderVariant('fresh');
+
+    const requestPayload = {
+      targetTeam: selectedTeam,
+      targetMetric,
+      targetThreshold,
+      teams,
+      fixtures,
+    };
+
+    if (!forceRefresh) {
+      try {
+        const preflightRes = await fetch('/api/deep-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...requestPayload,
+            checkCacheOnly: true,
+          }),
+        });
+
+        if (preflightRes.ok) {
+          const preflightData = await preflightRes.json();
+          if (typeof preflightData.cacheEnabled === 'boolean') {
+            setCacheEnabled(preflightData.cacheEnabled);
+          }
+          if (preflightData.cached === true) {
+            setLoaderVariant('cached');
+          }
+        }
+      } catch {
+        // If preflight fails, keep default fresh loader and continue generation.
+      }
+    }
+
+    setPhase('loading');
 
     abortRef.current = new AbortController();
+    const startedAt = Date.now();
 
     try {
       const res = await fetch('/api/deep-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetTeam: selectedTeam,
-          targetMetric,
-          targetThreshold,
-          teams,
-          fixtures,
+          ...requestPayload,
           forceRefresh,
         }),
         signal: abortRef.current.signal,
@@ -143,6 +177,15 @@ export default function DeepAnalysisModal({
       }
 
       const data = await res.json();
+
+      if (data.cacheStatus === 'hit') {
+        const elapsedMs = Date.now() - startedAt;
+        const minimumCachedLoaderMs = 10_000;
+        if (elapsedMs < minimumCachedLoaderMs) {
+          await new Promise((resolve) => setTimeout(resolve, minimumCachedLoaderMs - elapsedMs));
+        }
+      }
+
       setAnalysis(data.analysis);
       setWarning(typeof data.aiWarning === 'string' ? data.aiWarning : '');
       setCacheStatus(
@@ -275,7 +318,15 @@ export default function DeepAnalysisModal({
 
   // ── Loading ──
   if (phase === 'loading') {
-    return <DeepAnalysisLoader accentColor={accentColor} teamName={teamName} onComplete={() => {}} isReal />;
+    return (
+      <DeepAnalysisLoader
+        accentColor={accentColor}
+        teamName={teamName}
+        onComplete={() => {}}
+        isReal
+        variant={loaderVariant}
+      />
+    );
   }
 
   // ── Error ──

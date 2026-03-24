@@ -645,6 +645,7 @@ export async function POST(req: NextRequest) {
       teams,
       fixtures,
       forceRefresh = false,
+      checkCacheOnly = false,
     } = body as {
       targetTeam: string;
       targetMetric?: string;
@@ -652,6 +653,7 @@ export async function POST(req: NextRequest) {
       teams: Team[];
       fixtures: Fixture[];
       forceRefresh?: boolean;
+      checkCacheOnly?: boolean;
     };
 
     if (!teams?.length || !fixtures?.length || !targetTeam) {
@@ -668,6 +670,22 @@ export async function POST(req: NextRequest) {
       teams,
       fixtures,
     });
+
+    if (checkCacheOnly) {
+      if (!isDeepAnalysisCacheConfigured()) {
+        return NextResponse.json({
+          cacheEnabled: false,
+          cached: false,
+        });
+      }
+
+      const cached = await getCachedDeepAnalysis({ scenarioKey });
+      return NextResponse.json({
+        cacheEnabled: true,
+        cached: Boolean(cached),
+        cachedAt: cached?.generatedAt ?? null,
+      });
+    }
 
     if (!forceRefresh && isDeepAnalysisCacheConfigured()) {
       const cached = await getCachedDeepAnalysis({ scenarioKey });

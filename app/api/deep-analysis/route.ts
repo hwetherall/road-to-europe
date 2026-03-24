@@ -679,16 +679,27 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const cached = await getCachedDeepAnalysis({ scenarioKey });
+      const cached = await getCachedDeepAnalysis({
+        scenarioKey,
+        targetTeam,
+        targetMetric,
+        targetThreshold,
+      });
       return NextResponse.json({
         cacheEnabled: true,
         cached: Boolean(cached),
+        cacheMatchType: cached?.cacheMatchType ?? null,
         cachedAt: cached?.generatedAt ?? null,
       });
     }
 
     if (!forceRefresh && isDeepAnalysisCacheConfigured()) {
-      const cached = await getCachedDeepAnalysis({ scenarioKey });
+      const cached = await getCachedDeepAnalysis({
+        scenarioKey,
+        targetTeam,
+        targetMetric,
+        targetThreshold,
+      });
       if (cached) {
         return NextResponse.json({
           analysis: cached.analysis,
@@ -696,6 +707,7 @@ export async function POST(req: NextRequest) {
           pathResult: cached.pathResult,
           cacheStatus: 'hit',
           cacheEnabled: true,
+          cacheMatchType: cached.cacheMatchType,
           cachedAt: cached.generatedAt,
         });
       }

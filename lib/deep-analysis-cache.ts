@@ -16,6 +16,9 @@ interface ScenarioKeyInput {
 
 interface CacheLookupParams {
   scenarioKey: string;
+  targetTeam: string;
+  targetMetric: string;
+  targetThreshold: number;
 }
 
 interface CacheWriteParams {
@@ -33,6 +36,7 @@ export interface CachedDeepAnalysisRecord {
   pathResult: unknown;
   aiWarning: string;
   generatedAt: number;
+  cacheMatchType: 'exact' | 'scenario_fallback';
 }
 
 function getSupabaseAdminClient(): SupabaseClient | null {
@@ -101,33 +105,88 @@ export function isDeepAnalysisCacheConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
-export async function getCachedDeepAnalysis({
-  scenarioKey,
-}: CacheLookupParams): Promise<CachedDeepAnalysisRecord | null> {
-  const supabase = getSupabaseAdminClient();
-  if (!supabase) return null;
-
-  const { data, error } = await supabase
-    .from(TABLE_NAME)
-    .select('analysis, path_result, ai_warning, generated_at')
-    .eq('scenario_key', scenarioKey)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Deep analysis cache lookup failed:', error.message);
-    return null;
-  }
-
-  if (!data || !data.analysis) {
-    return null;
-  }
-
+function mapCachedRow(
+  data: {
+    analysis: unknown;
+    path_result: unknown;
+    ai_warning: unknown;
+    generated_at: string | null;
+  },
+  cacheMatchType: 'exact' | 'scenario_fallback'
+): CachedDeepAnalysisRecord | null {
+  if (!data.analysis) return null;
   return {
     analysis: data.analysis as DeepAnalysis,
     pathResult: data.path_result,
     aiWarning: typeof data.ai_warning === 'string' ? data.ai_warning : '',
     generatedAt: data.generated_at ? new Date(data.generated_at).getTime() : Date.now(),
+    cacheMatchType,
   };
+}
+
+export async function getCachedDeepAnalysis({
+  scenarioKey,
+  targetTeam,
+  targetMetric,
+  targetThreshold,
+}: CacheLookupParams): Promise<CachedDeepAnalysisRecord | null> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) return null;
+
+  const { data: exactData, error: exactError } = await supabase
+    .from(TABLE_NAME)
+    .select('analysis, path_result, ai_warning, generated_at')
+    .eq('scenario_key', scenarioKey)
+    .maybeSingle();
+
+  if (exactError) {
+    console.error('Deep analysis exact cache lookup failed:', exactError.message);
+    return null;
+  }
+
+  const exact = exactData
+    ? mapCachedRow(
+        exactData as {
+          analysis: unknown;
+          path_result: unknown;
+          ai_warning: unknown;
+          generated_at: string | null;
+        },
+        'exact'
+      )
+    : null;
+
+  if (exact) {
+    return exact;
+  }
+
+  // Fallback: reuse the most recently generated report for the same team + scenario settings.
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from(TABLE_NAME)
+    .select('analysis, path_result, ai_warning, generated_at')
+    .eq('target_team', targetTeam)
+    .eq('target_metric', targetMetric)
+    .eq('target_threshold', targetThreshold)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (fallbackError) {
+    console.error('Deep analysis fallback cache lookup failed:', fallbackError.message);
+    return null;
+  }
+
+  return fallbackData
+    ? mapCachedRow(
+        fallbackData as {
+          analysis: unknown;
+          path_result: unknown;
+          ai_warning: unknown;
+          generated_at: string | null;
+        },
+        'scenario_fallback'
+      )
+    : null;
 }
 
 export async function upsertDeepAnalysisCache({

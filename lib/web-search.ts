@@ -1,5 +1,6 @@
-const SERPER_API_KEY = process.env.SERPER_API_KEY;
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
+// Read keys lazily so they're always fresh from the server-side env
+function getSerperKey() { return process.env.SERPER_API_KEY; }
+function getTavilyKey() { return process.env.TAVILY_API_KEY; }
 
 interface SerperResult {
   title?: string;
@@ -63,14 +64,19 @@ function summariseTavilyResults(data: {
 }
 
 async function searchWithSerper(query: string): Promise<string | null> {
-  if (!SERPER_API_KEY) return null;
+  const key = getSerperKey();
+  if (!key) {
+    console.warn('[web-search] SERPER_API_KEY not found in env, skipping Serper');
+    return null;
+  }
 
   try {
+    console.log(`[web-search] Serper request: "${query.slice(0, 80)}"`);
     const response = await fetch('https://google.serper.dev/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': SERPER_API_KEY,
+        'X-API-KEY': key,
       },
       body: JSON.stringify({
         q: query,
@@ -80,26 +86,34 @@ async function searchWithSerper(query: string): Promise<string | null> {
 
     if (response.ok) {
       const data: SerperResponse = await response.json();
-      return summariseSerperResults(data);
+      const result = summariseSerperResults(data);
+      console.log(`[web-search] Serper OK — ${data.organic?.length ?? 0} results`);
+      return result;
     }
 
-    console.error('Serper search failed with status:', response.status);
+    const errorBody = await response.text().catch(() => '');
+    console.error(`[web-search] Serper failed (${response.status}):`, errorBody.slice(0, 200));
     return null;
   } catch (e) {
-    console.error('Serper search failed:', e);
+    console.error('[web-search] Serper network error:', e);
     return null;
   }
 }
 
 async function searchWithTavily(query: string): Promise<string | null> {
-  if (!TAVILY_API_KEY) return null;
+  const key = getTavilyKey();
+  if (!key) {
+    console.warn('[web-search] TAVILY_API_KEY not found in env, skipping Tavily');
+    return null;
+  }
 
   try {
+    console.log(`[web-search] Tavily fallback request: "${query.slice(0, 80)}"`);
     const response = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
+        api_key: key,
         query,
         search_depth: 'basic',
         max_results: 5,
@@ -109,13 +123,15 @@ async function searchWithTavily(query: string): Promise<string | null> {
 
     if (response.ok) {
       const data = await response.json();
+      console.log(`[web-search] Tavily OK — ${data.results?.length ?? 0} results`);
       return summariseTavilyResults(data);
     }
 
-    console.error('Tavily search failed with status:', response.status);
+    const errorBody = await response.text().catch(() => '');
+    console.error(`[web-search] Tavily failed (${response.status}):`, errorBody.slice(0, 200));
     return null;
   } catch (e) {
-    console.error('Tavily search failed:', e);
+    console.error('[web-search] Tavily network error:', e);
     return null;
   }
 }
@@ -132,5 +148,6 @@ export async function executeWebSearch(query: string): Promise<string> {
   const tavilyResult = await searchWithTavily(query);
   if (tavilyResult) return tavilyResult;
 
+  console.error('[web-search] Both Serper and Tavily failed/unavailable for query:', query.slice(0, 80));
   return '[Search unavailable — neither SERPER_API_KEY nor TAVILY_API_KEY are configured or working.]';
 }

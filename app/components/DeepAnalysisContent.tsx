@@ -265,6 +265,13 @@ function formatDate(dateStr: string): string {
   }
 }
 
+function formatPlausibilityText(value: number): string {
+  const pct = value * 100;
+  if (pct === 0) return '0.0%';
+  if (pct < 0.1) return '<0.1%';
+  return `${pct.toFixed(1)}%`;
+}
+
 function getMetricLabel(metric: string): string {
   switch (metric) {
     case 'championPct': return 'Champion';
@@ -374,7 +381,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
                   ~{stateOfPlay.optimalPathOdds.toFixed(0)}%
                 </strong> — effectively safe. But the probability of all those results landing together is roughly{' '}
                 <strong className="text-white/70">
-                  {(stateOfPlay.optimalPathPlausibility * 100).toFixed(1)}%
+                  {formatPlausibilityText(stateOfPlay.optimalPathPlausibility)}
                 </strong>. That&apos;s the ceiling.
               </>
             ) : (
@@ -384,7 +391,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
                   ~{stateOfPlay.optimalPathOdds.toFixed(0)}%
                 </strong>. But the probability of all those results landing together is roughly{' '}
                 <strong className="text-white/70">
-                  {(stateOfPlay.optimalPathPlausibility * 100).toFixed(1)}%
+                  {formatPlausibilityText(stateOfPlay.optimalPathPlausibility)}
                 </strong>. That&apos;s the ceiling.
               </>
             )}
@@ -503,7 +510,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
           <div className="space-y-4 mb-4">
             {matchesToWatch.map((match, i) => (
               <FixtureCard
-                key={match.fixtureId || i}
+                key={`${match.fixtureId || 'unknown'}:${match.homeTeam}:${match.awayTeam}:${match.idealResult}:${i}`}
                 title={`${i + 1}. ${match.homeTeam} vs ${match.awayTeam}`}
                 why={match.whyItMatters}
                 detail={match.whyItsPlausible}

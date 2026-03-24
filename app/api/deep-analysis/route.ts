@@ -130,8 +130,15 @@ function formatOptimalPath(path: CandidatePath): string {
     .join('\n');
 }
 
+function formatPlausibilityPercent(value: number): string {
+  const pct = value * 100;
+  if (pct === 0) return '0.0%';
+  if (pct < 0.1) return '<0.1%';
+  return `${pct.toFixed(1)}%`;
+}
+
 function formatCandidatePath(path: CandidatePath, index: number): string {
-  return `Path ${index + 1} (plausibility: ${(path.compositePlausibility * 100).toFixed(1)}%, resulting odds: ${path.resultingOdds.toFixed(1)}%):
+  return `Path ${index + 1} (plausibility: ${formatPlausibilityPercent(path.compositePlausibility)}, resulting odds: ${path.resultingOdds.toFixed(1)}%):
 ${path.locks.map((l) => `  - ${l.homeTeam} vs ${l.awayTeam}: ${l.resultLabel}`).join('\n')}`;
 }
 
@@ -450,6 +457,7 @@ Return a JSON object wrapped in \`\`\`json blocks. Match this exact structure:
 4. "risks" are about the OPPONENT's threat to ${teamName}. "angles" are about ${teamName}'s opportunity against the opponent. Don't mix them up.
 5. Every "angle" must contain a TACTICAL MECHANISM. "Good away form" is NOT an angle. "Counter-pressing system suits away fixtures because it invites pressure then exploits the space behind the opponent's committed full-backs" IS an angle.
 6. ${isRelegation ? 'This is a RELEGATION analysis. Frame everything through the lens of survival: points needed, safety margins, "must-not-lose" fixtures. The tone should acknowledge the precariousness without being fatalistic.' : isChampion ? 'This is a TITLE analysis. Frame everything through the lens of maintaining/closing the gap, and rivals dropping points.' : 'This is a EUROPEAN QUALIFICATION analysis. Frame everything through the lens of climbing the table and overhauling the teams above.'}
+7. NEVER duplicate fixtures in matchesToWatch. Each fixture must appear EXACTLY ONCE. If you find yourself listing the same matchup twice, remove the duplicate. Produce exactly 3-4 UNIQUE matches.
 7. VERIFY TEAM MOTIVATIONS AGAINST THE STANDINGS TABLE. Before claiming a team is "in the European race", "fighting for the title", "battling relegation", or has any competitive motivation, CHECK their actual league position in the standings table above. A 17th-placed team is NOT in a European race. A 3rd-placed team is NOT in a relegation battle. Get this right — it destroys credibility when you get it wrong.
 8. SENSITIVITY ≠ COMPETITIVENESS. A fixture appearing in the sensitivity data means its result significantly affects ${teamName}'s odds — it does NOT mean the fixture is closely matched or competitive. A dominant favourite beating a bottom-half team can be high-leverage. Do not describe a fixture as "competitive" or "closely contested" based solely on its presence in sensitivity data. Check the standings and form data to make actual competitiveness claims.`;
 }
@@ -729,6 +737,19 @@ async function runWritingPhase(
   }
 
   if (!analysis) return {};
+
+  // ── Deduplicate matchesToWatch ──
+  if (analysis.matchesToWatch && Array.isArray(analysis.matchesToWatch)) {
+    const seen = new Set<string>();
+    analysis.matchesToWatch = analysis.matchesToWatch.filter((m) => {
+      const key = m.fixtureId
+        ? m.fixtureId
+        : `${m.homeTeam}:${m.awayTeam}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   // ── Post-generation validation ──
   const violations = validateAnalysis(analysis, sortedTeams, pathResult.sensitivityData);
@@ -1015,7 +1036,7 @@ export async function POST(req: NextRequest) {
         optimalPathPlausibility: pathResult.optimalPath.compositePlausibility,
         contextNarrative:
           narrativeData.stateOfPlay?.contextNarrative ??
-          `${teamName} sit ${position}th on ${teamPoints} points with ${gamesRemaining} matches remaining. The baseline simulation gives them a ${pathResult.baselineOdds.toFixed(1)}% chance of achieving the target. The optimal path — where everything breaks their way — pushes this to ${pathResult.optimalPath.resultingOdds.toFixed(1)}%, but the probability of all those results occurring together is just ${(pathResult.optimalPath.compositePlausibility * 100).toFixed(1)}%.`,
+          `${teamName} sit ${position}th on ${teamPoints} points with ${gamesRemaining} matches remaining. The baseline simulation gives them a ${pathResult.baselineOdds.toFixed(1)}% chance of achieving the target. The optimal path — where everything breaks their way — pushes this to ${pathResult.optimalPath.resultingOdds.toFixed(1)}%, but the probability of all those results occurring together is just ${formatPlausibilityPercent(pathResult.optimalPath.compositePlausibility)}.`,
       },
 
       decisiveMatch: {
@@ -1114,10 +1135,23 @@ export async function POST(req: NextRequest) {
     };
 
     if (isDeepAnalysisCacheConfigured()) {
+      // Derive the finishing-position threshold from the metric name
+      const thresholdMap: Record<string, number> = {
+        championPct: 1,
+        top4Pct: 4,
+        top5Pct: 5,
+        top6Pct: 6,
+        top7Pct: 7,
+        relegationPct: 18,
+        survivalPct: 18,
+      };
+      const targetThreshold = thresholdMap[targetMetric] ?? 7;
+
       await upsertDeepAnalysisCache({
         scenarioKey,
         targetTeam,
         targetMetric,
+        targetThreshold,
         analysis,
         pathResult: pathResultPayload,
         aiWarning,

@@ -20,6 +20,7 @@ interface Props {
   cards: CardConfig[];
   hasActiveChapters: boolean;
   accentColor: string;
+  textAccentColor: string;
   numSims: number;
   sensitivityMetric: SensitivityMetric;
   sensitivityMetricLabel: string;
@@ -34,6 +35,7 @@ export default function KyleMiniDashboard({
   cards,
   hasActiveChapters,
   accentColor,
+  textAccentColor,
   numSims,
   sensitivityMetric,
   sensitivityMetricLabel,
@@ -57,7 +59,7 @@ export default function KyleMiniDashboard({
           </span>
           <span
             className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-            style={{ background: `${accentColor}25`, color: accentColor }}
+            style={{ background: `${accentColor}25`, color: textAccentColor }}
           >
             {position}{suffix}
           </span>

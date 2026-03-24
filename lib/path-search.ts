@@ -10,6 +10,10 @@ import {
 import { simulateFast, simulateFull } from './server-simulation';
 import { compositePlausibility, filterByPlausibility, deduplicatePaths } from './plausibility';
 
+const MIN_COMPOSITE_PLAUSIBILITY = 0.005; // 0.5%
+const MIN_LOCK_IMPROVEMENT_PP = 0.25;
+const PLAUSIBILITY_WEIGHT = 0.35;
+
 // ── Helpers ──
 
 function applyLocks(fixtures: Fixture[], locks: FixtureLock[]): Fixture[] {
@@ -81,6 +85,14 @@ function buildCandidatePath(
 function getMetricValue(result: SimulationResult | undefined, metric: keyof SimulationResult): number {
   if (!result) return 0;
   return result[metric] as number;
+}
+
+function getImprovement(
+  currentOdds: number,
+  candidateOdds: number,
+  minimize: boolean
+): number {
+  return minimize ? currentOdds - candidateOdds : candidateOdds - currentOdds;
 }
 
 // ── Main Path Search ──
@@ -157,18 +169,33 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
     maxLocks: number
   ): CandidatePath {
     const locks: FixtureLock[] = [...startingLocks];
+    let currentPlausibility = compositePlausibility(locks);
+
+    const startingFixtures = applyLocks(fixtures, locks);
+    const startingResult = simulateFast(teams, startingFixtures, 1000);
+    totalSims += 1000;
+    let currentOdds = getMetricValue(
+      startingResult.find((r) => r.team === targetTeam),
+      targetMetric
+    );
 
     for (let step = locks.length; step < maxLocks; step++) {
-      let bestFixtureId = '';
-      let bestResult: 'home' | 'draw' | 'away' = 'home';
-      let bestOdds = minimize ? Infinity : -1;
+      let bestLock: FixtureLock | null = null;
+      let bestOdds = currentOdds;
+      let bestImprovement = 0;
+      let bestUtility = -Infinity;
+      let bestPlausibility = currentPlausibility;
 
       for (const sf of topFixtures) {
         if (locks.some((l) => l.fixtureId === sf.fixtureId)) continue;
         if (excludeFixtures.has(sf.fixtureId)) continue;
 
         for (const result of ['home', 'draw', 'away'] as const) {
-          const testLocks = [...locks, makeFixtureLock(sf, result, fixtures)];
+          const candidateLock = makeFixtureLock(sf, result, fixtures);
+          const testLocks = [...locks, candidateLock];
+          const candidatePlausibility = compositePlausibility(testLocks);
+          if (candidatePlausibility < MIN_COMPOSITE_PLAUSIBILITY) continue;
+
           const testFixtures = applyLocks(fixtures, testLocks);
           const simResult = simulateFast(teams, testFixtures, 1000);
           totalSims += 1000;
@@ -176,25 +203,28 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
             simResult.find((r) => r.team === targetTeam),
             targetMetric
           );
+          const improvement = getImprovement(currentOdds, odds, minimize);
+          if (improvement <= 0) continue;
 
-          const isBetter = minimize ? odds < bestOdds : odds > bestOdds;
-          if (isBetter) {
+          const utility =
+            improvement * Math.pow(candidatePlausibility, PLAUSIBILITY_WEIGHT);
+
+          if (utility > bestUtility) {
+            bestLock = candidateLock;
             bestOdds = odds;
-            bestFixtureId = sf.fixtureId;
-            bestResult = result;
+            bestImprovement = improvement;
+            bestUtility = utility;
+            bestPlausibility = candidatePlausibility;
           }
         }
       }
 
-      if (!bestFixtureId) break;
+      if (!bestLock) break;
+      if (bestImprovement < MIN_LOCK_IMPROVEMENT_PP) break;
 
-      locks.push(
-        makeFixtureLock(
-          topFixtures.find((f) => f.fixtureId === bestFixtureId)!,
-          bestResult,
-          fixtures
-        )
-      );
+      locks.push(bestLock);
+      currentOdds = bestOdds;
+      currentPlausibility = bestPlausibility;
 
     }
 

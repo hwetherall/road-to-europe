@@ -564,6 +564,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             cards={teamContext.relevantCards}
             hasActiveChapters={hasActiveChapters}
             accentColor={accentColor}
+            textAccentColor={textColor}
             numSims={SIM_COUNT}
             sensitivityMetric={sensitivityMetric}
             sensitivityMetricLabel={sensitivityMetricLabel}
@@ -713,6 +714,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 results={simResults}
                 selectedTeam={selectedTeam}
                 accentColor={accentColor}
+                textAccentColor={textColor}
                 teams={teams}
               />
             )}
@@ -723,10 +725,16 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               selectedTeam={selectedTeam}
               teams={teams}
               accentColor={accentColor}
+              textAccentColor={textColor}
             />
 
             {/* Standings */}
-            <StandingsTable teams={teams} selectedTeam={selectedTeam} accentColor={accentColor} />
+            <StandingsTable
+              teams={teams}
+              selectedTeam={selectedTeam}
+              accentColor={accentColor}
+              textAccentColor={textColor}
+            />
 
             {/* Methodology */}
             <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 mb-8 text-xs text-white/40 leading-7">

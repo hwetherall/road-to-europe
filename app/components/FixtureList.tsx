@@ -7,13 +7,14 @@ interface Props {
   selectedTeam: string;
   teams: Team[];
   accentColor: string;
+  textAccentColor: string;
 }
 
 function getTeamName(abbr: string, teams: Team[]): string {
   return teams.find((t) => t.abbr === abbr)?.name ?? abbr;
 }
 
-export default function FixtureList({ fixtures, selectedTeam, teams, accentColor }: Props) {
+export default function FixtureList({ fixtures, selectedTeam, teams, accentColor, textAccentColor }: Props) {
   const teamFixtures = fixtures.filter(
     (f) => f.status === 'SCHEDULED' && (f.homeTeam === selectedTeam || f.awayTeam === selectedTeam)
   );
@@ -45,7 +46,7 @@ export default function FixtureList({ fixtures, selectedTeam, teams, accentColor
                   className="text-[10px] font-bold px-2 py-0.5 rounded tracking-wider"
                   style={
                     isHome
-                      ? { background: `${accentColor}22`, color: accentColor }
+                      ? { background: `${accentColor}22`, color: textAccentColor }
                       : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.4)' }
                   }
                 >

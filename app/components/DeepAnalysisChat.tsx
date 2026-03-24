@@ -12,6 +12,13 @@ interface Props {
   analysis: DeepAnalysis;
 }
 
+function formatPlausibilityText(value: number): string {
+  const pct = value * 100;
+  if (pct === 0) return '0.0%';
+  if (pct < 0.1) return '<0.1%';
+  return `${pct.toFixed(1)}%`;
+}
+
 function buildAnalysisContext(analysis: DeepAnalysis, teamName: string): string {
   const { stateOfPlay, decisiveMatch, matchesToWatch, bottomLine } = analysis;
   const metricLabel = analysis.targetMetric.replace('Pct', '').replace('top', 'Top-');
@@ -33,7 +40,7 @@ KEY FACTS FROM THE ANALYSIS:
 - ${teamName} are ${stateOfPlay.position}th on ${stateOfPlay.points} points with ${stateOfPlay.gamesRemaining} matches remaining
 - They need ${metricLabel} for Europe. Gap: ${stateOfPlay.gapToTarget} points
 - Current ${metricLabel} probability: ~${stateOfPlay.baselineOdds.toFixed(1)}%
-- Optimal path ceiling: ~${stateOfPlay.optimalPathOdds.toFixed(1)}% (plausibility: ${(stateOfPlay.optimalPathPlausibility * 100).toFixed(1)}%)
+- Optimal path ceiling: ~${stateOfPlay.optimalPathOdds.toFixed(1)}% (plausibility: ${formatPlausibilityText(stateOfPlay.optimalPathPlausibility)})
 
 DECISIVE MATCH: ${decisiveMatch.homeTeam} vs ${decisiveMatch.awayTeam}
 Outcome table:

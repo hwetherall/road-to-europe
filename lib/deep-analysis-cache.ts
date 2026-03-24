@@ -23,6 +23,7 @@ interface CacheWriteParams {
   scenarioKey: string;
   targetTeam: string;
   targetMetric: string;
+  targetThreshold: number;
   analysis: DeepAnalysis;
   pathResult: unknown;
   aiWarning: string;
@@ -187,6 +188,7 @@ export async function upsertDeepAnalysisCache({
   scenarioKey,
   targetTeam,
   targetMetric,
+  targetThreshold,
   analysis,
   pathResult,
   aiWarning,
@@ -198,6 +200,7 @@ export async function upsertDeepAnalysisCache({
     scenario_key: scenarioKey,
     target_team: targetTeam,
     target_metric: targetMetric,
+    target_threshold: targetThreshold,
     analysis,
     path_result: pathResult,
     ai_warning: aiWarning,

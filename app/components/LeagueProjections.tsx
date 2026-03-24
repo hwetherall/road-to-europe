@@ -7,6 +7,7 @@ interface Props {
   results: SimulationResult[];
   selectedTeam: string;
   accentColor: string;
+  textAccentColor: string;
   teams: Team[];
 }
 
@@ -18,7 +19,7 @@ function getTeamPoints(abbr: string, teams: Team[]): number {
   return teams.find((t) => t.abbr === abbr)?.points ?? 0;
 }
 
-export default function LeagueProjections({ results, selectedTeam, accentColor, teams }: Props) {
+export default function LeagueProjections({ results, selectedTeam, accentColor, textAccentColor, teams }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const sorted = [...results].sort((a, b) => a.avgPosition - b.avgPosition);
@@ -79,7 +80,7 @@ export default function LeagueProjections({ results, selectedTeam, accentColor, 
                         className={`px-2.5 py-2.5 ${
                           isSelected ? 'font-bold' : 'text-white/80'
                         }`}
-                        style={isSelected ? { color: accentColor } : undefined}
+                        style={isSelected ? { color: textAccentColor } : undefined}
                       >
                         {getTeamName(r.team, teams)}
                       </td>

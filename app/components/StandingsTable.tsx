@@ -6,6 +6,7 @@ interface Props {
   teams: Team[];
   selectedTeam: string;
   accentColor: string;
+  textAccentColor: string;
 }
 
 const ZONE_COLORS: Record<string, string> = {
@@ -25,7 +26,7 @@ function getZone(position: number): string | null {
   return null;
 }
 
-export default function StandingsTable({ teams, selectedTeam, accentColor }: Props) {
+export default function StandingsTable({ teams, selectedTeam, accentColor, textAccentColor }: Props) {
   const sorted = [...teams].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     if (b.goalDifference !== a.goalDifference)
@@ -85,7 +86,7 @@ export default function StandingsTable({ teams, selectedTeam, accentColor }: Pro
                       className={`px-3 py-2.5 ${
                         isSelected ? 'font-bold' : 'text-white/85'
                       }`}
-                      style={isSelected ? { color: accentColor } : undefined}
+                      style={isSelected ? { color: textAccentColor } : undefined}
                     >
                       {t.name}
                     </td>

@@ -77,7 +77,7 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
 
   const QUICK_PROMPTS = [
     `Why is ${analysis.decisiveMatch.homeTeam} vs ${analysis.decisiveMatch.awayTeam} so decisive?`,
-    `What is the clearest path to ${analysis.targetThreshold}% odds?`,
+    'What is the clearest path to improve these odds?',
     analysis.matchesToWatch[0]
       ? `Tell me more about ${analysis.matchesToWatch[0].homeTeam} vs ${analysis.matchesToWatch[0].awayTeam}`
       : 'Which non-team fixture has the highest leverage?',

@@ -1,5 +1,4 @@
 import {
-  Team,
   Fixture,
   SimulationResult,
   SensitivityResult,
@@ -61,9 +60,7 @@ function buildCandidatePath(
   locks: FixtureLock[],
   resultingOdds: number,
   baselineOdds: number,
-  targetThreshold: number,
-  targetTeam: string,
-  minimize: boolean = false
+  targetTeam: string
 ): CandidatePath {
   return {
     id: crypto.randomUUID(),
@@ -72,7 +69,6 @@ function buildCandidatePath(
     baselineOdds,
     delta: resultingOdds - baselineOdds,
     compositePlausibility: compositePlausibility(locks),
-    crossesThreshold: minimize ? resultingOdds <= targetThreshold : resultingOdds >= targetThreshold,
     locksInvolvingTarget: locks.filter(
       (l) => l.homeTeam === targetTeam || l.awayTeam === targetTeam
     ).length,
@@ -95,7 +91,6 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
     fixtures,
     targetTeam,
     targetMetric,
-    targetThreshold,
     maxFixturesToLock,
     branchDepth,
   } = config;
@@ -201,9 +196,6 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
         )
       );
 
-      // Early exit if we've crossed the threshold
-      const crossed = minimize ? bestOdds <= targetThreshold : bestOdds >= targetThreshold;
-      if (crossed && step >= 2) break;
     }
 
     // Final validation with full 10K sims
@@ -215,7 +207,7 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
       targetMetric
     );
 
-    return buildCandidatePath(locks, finalOdds, baselineOdds, targetThreshold, targetTeam, minimize);
+    return buildCandidatePath(locks, finalOdds, baselineOdds, targetTeam);
   }
 
   const optimalPath = buildGreedyPath([], new Set(), maxFixturesToLock);

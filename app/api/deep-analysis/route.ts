@@ -432,7 +432,7 @@ Produce 3-4 matches to watch. Include a MIX: some should be the target team's ow
 
 ### Good "bottomLine"
 - "summary": 2-3 sentences. A pundit wrapping up the segment. Name the central tension. ("Tottenham's survival hinges on their bizarre split personality — they need to keep performing like a mid-table side on the road while somehow not being the worst home team in the division.")
-- "keyScenario": ONE concrete sentence naming the specific combination of results that crosses the threshold. ("Beat Chelsea away in their worst form of the season, beat Everton at home to end the home drought, and let Arsenal handle West Ham — that combination drops Spurs' relegation probability to around 4%.")
+- "keyScenario": ONE concrete sentence naming the specific combination of results that creates the strongest plausible swing. ("Beat Chelsea away in their worst form of the season, beat Everton at home to end the home drought, and let Arsenal handle West Ham — that combination drops Spurs' relegation probability to around 4%.")
 
 ## OUTPUT FORMAT
 Return a JSON object wrapped in \`\`\`json blocks. Match this exact structure:
@@ -872,7 +872,6 @@ export async function POST(req: NextRequest) {
     const {
       targetTeam,
       targetMetric = 'top7Pct',
-      targetThreshold = 50,
       teams,
       fixtures,
       forceRefresh = false,
@@ -880,7 +879,6 @@ export async function POST(req: NextRequest) {
     } = body as {
       targetTeam: string;
       targetMetric?: string;
-      targetThreshold?: number;
       teams: Team[];
       fixtures: Fixture[];
       forceRefresh?: boolean;
@@ -897,7 +895,6 @@ export async function POST(req: NextRequest) {
     const scenarioKey = createDeepAnalysisScenarioKey({
       targetTeam,
       targetMetric,
-      targetThreshold,
       teams,
       fixtures,
     });
@@ -914,7 +911,6 @@ export async function POST(req: NextRequest) {
         scenarioKey,
         targetTeam,
         targetMetric,
-        targetThreshold,
       });
       return NextResponse.json({
         cacheEnabled: true,
@@ -929,7 +925,6 @@ export async function POST(req: NextRequest) {
         scenarioKey,
         targetTeam,
         targetMetric,
-        targetThreshold,
       });
       if (cached) {
         return NextResponse.json({
@@ -950,7 +945,6 @@ export async function POST(req: NextRequest) {
       fixtures,
       targetTeam,
       targetMetric: targetMetric as keyof import('@/lib/types').SimulationResult,
-      targetThreshold,
       maxFixturesToLock: 8,
       branchDepth: 3,
     };
@@ -1049,7 +1043,6 @@ export async function POST(req: NextRequest) {
       generatedAt: Date.now(),
       targetTeam,
       targetMetric,
-      targetThreshold,
 
       stateOfPlay: {
         position,
@@ -1144,7 +1137,7 @@ export async function POST(req: NextRequest) {
         summary: `${teamName}'s path to their target runs through the fixtures identified in this analysis. The baseline odds are ${pathResult.baselineOdds.toFixed(1)}%, but the right combination of results can push this significantly higher.`,
         keyScenario: pathResult.candidatePaths[0]
           ? `The most plausible path requires: ${pathResult.candidatePaths[0].locks.map((l) => l.resultLabel).join(', ')}. This would push odds to ${pathResult.candidatePaths[0].resultingOdds.toFixed(1)}%.`
-          : 'No viable path found that crosses the threshold.',
+          : 'No viable path found that materially improves the current outlook.',
       },
 
       sources: [...new Set(sources)],
@@ -1164,7 +1157,6 @@ export async function POST(req: NextRequest) {
         scenarioKey,
         targetTeam,
         targetMetric,
-        targetThreshold,
         analysis,
         pathResult: pathResultPayload,
         aiWarning,

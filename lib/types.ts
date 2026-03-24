@@ -89,7 +89,6 @@ export interface PathSearchConfig {
   fixtures: Fixture[];
   targetTeam: string;
   targetMetric: keyof SimulationResult;
-  targetThreshold: number;
   maxFixturesToLock: number;
   branchDepth: number;
 }
@@ -110,7 +109,6 @@ export interface CandidatePath {
   baselineOdds: number;
   delta: number;
   compositePlausibility: number;
-  crossesThreshold: boolean;
   locksInvolvingTarget: number;
   locksInvolvingRivals: number;
 }
@@ -136,7 +134,6 @@ export interface DeepAnalysis {
   generatedAt: number;
   targetTeam: string;
   targetMetric: string;
-  targetThreshold: number;
 
   stateOfPlay: {
     position: number;

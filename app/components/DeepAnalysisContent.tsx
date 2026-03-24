@@ -51,11 +51,10 @@ function ImpactRow({ result, odds, change, accent, highlight }: { result: string
   );
 }
 
-function ScenarioPathway({ accent, bestPath, baselineOdds, threshold }: {
+function ScenarioPathway({ accent, bestPath, baselineOdds }: {
   accent: string;
   bestPath: CandidatePath | null;
   baselineOdds: number;
-  threshold: number;
 }) {
   if (!bestPath || bestPath.locks.length === 0) return null;
 
@@ -78,19 +77,18 @@ function ScenarioPathway({ accent, bestPath, baselineOdds, threshold }: {
     });
   }
 
-  const maxVal = Math.max(threshold + 15, ...steps.map((s) => s.value + 10));
+  const maxVal = Math.max(...steps.map((s) => s.value + 10), 15);
 
   return (
     <div className="mt-6">
       <div className="text-[10px] tracking-[0.12em] uppercase text-white/30 mb-4 text-center">
-        The path to {threshold}%
+        Scenario progression
       </div>
       <div className="space-y-0">
         {steps.map((step, i) => {
           const barWidth = (step.value / maxVal) * 100;
           const prevWidth = i > 0 ? (steps[i - 1].value / maxVal) * 100 : 0;
-          const isLast = i === steps.length - 1;
-          const crossedThreshold = step.value >= threshold;
+          const isImprovement = step.value >= Math.round(baselineOdds);
 
           return (
             <div key={i} className="flex items-center gap-3 py-2">
@@ -116,26 +114,14 @@ function ScenarioPathway({ accent, bestPath, baselineOdds, threshold }: {
                   className="absolute top-0 left-0 h-full rounded transition-all duration-700"
                   style={{
                     width: `${barWidth}%`,
-                    background: crossedThreshold
+                    background: isImprovement
                       ? `linear-gradient(90deg, ${accent}30, ${accent}70)`
                       : step.isBase
                         ? 'rgba(255,255,255,0.08)'
                         : `linear-gradient(90deg, ${accent}15, ${accent}40)`,
-                    boxShadow: crossedThreshold ? `0 0 16px ${accent}30` : 'none',
+                    boxShadow: isImprovement ? `0 0 16px ${accent}30` : 'none',
                   }}
                 />
-                <div
-                  className="absolute top-0 h-full w-px"
-                  style={{ left: `${(threshold / maxVal) * 100}%`, background: 'rgba(255,255,255,0.15)' }}
-                />
-                {isLast && (
-                  <div
-                    className="absolute top-[-18px] text-[8px] tracking-wider uppercase text-white/25"
-                    style={{ left: `${(threshold / maxVal) * 100}%`, transform: 'translateX(-50%)' }}
-                  >
-                    {threshold}% threshold
-                  </div>
-                )}
                 <div
                   className="absolute top-0 h-full flex items-center pl-2"
                   style={{ left: `${barWidth}%` }}
@@ -143,7 +129,7 @@ function ScenarioPathway({ accent, bestPath, baselineOdds, threshold }: {
                   <span
                     className="font-oswald text-[12px] font-bold whitespace-nowrap"
                     style={{
-                      color: crossedThreshold ? accent : step.isBase ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.6)',
+                      color: isImprovement ? accent : step.isBase ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.6)',
                     }}
                   >
                     {step.value}%
@@ -312,7 +298,7 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
   const metricLabel = getMetricLabel(analysis.targetMetric);
   const isRelegation = analysis.targetMetric === 'relegationPct' || analysis.targetMetric === 'survivalPct';
 
-  // Find the best path that crosses threshold for the waterfall
+  // Placeholder for future best-path waterfall support.
   const bestPath = null as CandidatePath | null; // Will be passed from parent if available
 
   return (
@@ -557,7 +543,6 @@ export default function DeepAnalysisContent({ accentColor, textAccentColor = acc
             accent={accentColor}
             bestPath={bestPath}
             baselineOdds={stateOfPlay.baselineOdds}
-            threshold={analysis.targetThreshold}
           />
 
           <div className="mt-6" />

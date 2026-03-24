@@ -30,14 +30,34 @@ type DeepAnalysisMetric = Exclude<SensitivityMetric, 'survivalPct'>;
 
 type DeepAnalysisMetricResult = Pick<SimulationResult, DeepAnalysisMetric>;
 
-const DEEP_ANALYSIS_MIN_COMPETITIVE_PCT = 2;
-const DEEP_ANALYSIS_MAX_COMPETITIVE_PCT = 98;
+function isPossibleMetric(value: number): boolean {
+  return value > 0 && value < 100;
+}
 
-function isCompetitiveMetric(value: number): boolean {
-  return (
-    value >= DEEP_ANALYSIS_MIN_COMPETITIVE_PCT &&
-    value <= DEEP_ANALYSIS_MAX_COMPETITIVE_PCT
-  );
+function getTargetMetricLabel(metric: string): string {
+  switch (metric) {
+    case 'championPct':
+      return 'League Champion';
+    case 'relegationPct':
+      return 'Relegation';
+    case 'top4Pct':
+      return 'Champions League';
+    case 'top7Pct':
+      return 'Any Europe';
+    case 'top5Pct':
+      return 'Top 5';
+    case 'top6Pct':
+      return 'Top 6';
+    default:
+      return metric.replace('Pct', '').replace('top', 'Top ');
+  }
+}
+
+function formatMetricPct(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return '--';
+  if (value < 1) return `${value.toFixed(1)}%`;
+  if (value > 99 && value < 100) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
 }
 
 export default function DeepAnalysisModal({
@@ -63,18 +83,17 @@ export default function DeepAnalysisModal({
   const [cacheEnabled, setCacheEnabled] = useState<boolean>(true);
   const [loaderVariant, setLoaderVariant] = useState<'cached' | 'fresh'>('fresh');
   const [targetMetric, setTargetMetric] = useState<string>(sensitivityMetric);
-  const [targetThreshold, setTargetThreshold] = useState(50);
   const abortRef = useRef<AbortController | null>(null);
 
   const teamName = teams.find((t) => t.abbr === selectedTeam)?.name ?? selectedTeam;
   const allMetricOptions = useMemo(
     (): { value: DeepAnalysisMetric; label: string }[] => [
       { value: 'championPct', label: 'League Champion (1st)' },
+      { value: 'relegationPct', label: 'Relegation (Bottom 3)' },
       { value: 'top4Pct', label: 'Champions League (Top 4)' },
+      { value: 'top7Pct', label: 'Any Europe (Top 7)' },
       { value: 'top5Pct', label: 'UCL Expanded (Top 5)' },
       { value: 'top6Pct', label: 'Europa League (Top 6)' },
-      { value: 'top7Pct', label: 'Any Europe (Top 7)' },
-      { value: 'relegationPct', label: 'Relegation (Bottom 3)' },
     ],
     []
   );
@@ -82,10 +101,28 @@ export default function DeepAnalysisModal({
     () =>
       selectedTeamResult
         ? allMetricOptions.filter((option) =>
-            isCompetitiveMetric(selectedTeamResult[option.value])
+            isPossibleMetric(selectedTeamResult[option.value])
           )
         : allMetricOptions,
     [allMetricOptions, selectedTeamResult]
+  );
+  const metricOptionsWithPct = useMemo(
+    () => {
+      const options = metricOptions.map((option) => ({
+        ...option,
+        pct: selectedTeamResult ? selectedTeamResult[option.value] : null,
+      }));
+
+      if (!selectedTeamResult) return options;
+
+      return [...options].sort((a, b) => {
+        const aDistance = Math.abs((a.pct ?? 0) - 50);
+        const bDistance = Math.abs((b.pct ?? 0) - 50);
+        if (aDistance !== bDistance) return aDistance - bDistance;
+        return (b.pct ?? 0) - (a.pct ?? 0);
+      });
+    },
+    [metricOptions, selectedTeamResult]
   );
   const hasMetricOptions = metricOptions.length > 0;
 
@@ -128,7 +165,6 @@ export default function DeepAnalysisModal({
     const requestPayload = {
       targetTeam: selectedTeam,
       targetMetric,
-      targetThreshold,
       teams,
       fixtures,
     };
@@ -211,7 +247,7 @@ export default function DeepAnalysisModal({
       setError(e instanceof Error ? e.message : 'Unknown error');
       setPhase('error');
     }
-  }, [selectedTeam, targetMetric, targetThreshold, teams, fixtures]);
+  }, [selectedTeam, targetMetric, teams, fixtures]);
 
   // Escape to close
   useEffect(() => {
@@ -257,45 +293,46 @@ export default function DeepAnalysisModal({
               <label className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-2 block">
                 Target
               </label>
-              <select
-                value={targetMetric}
-                onChange={(e) => setTargetMetric(e.target.value)}
-                disabled={!hasMetricOptions}
-                className="w-full bg-white/[0.04] border border-white/[0.1] rounded-lg px-3 py-2.5 text-sm text-white/80 outline-none focus:border-white/20"
-              >
-                {metricOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="bg-[#1a1a1a]">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              {!hasMetricOptions && (
-                <div className="text-[11px] text-white/45 mt-2">
-                  No meaningful deep-analysis target is currently available for {teamName}. This
-                  team&apos;s major outcomes are close to locked in.
+              {hasMetricOptions && (
+                <div className="space-y-2">
+                  {metricOptionsWithPct.map((opt) => {
+                    const isSelected = targetMetric === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setTargetMetric(opt.value)}
+                        className="w-full rounded-lg px-3 py-2.5 text-left transition-colors cursor-pointer"
+                        style={{
+                          background: isSelected ? `${accentColor}14` : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${isSelected ? `${accentColor}66` : 'rgba(255,255,255,0.1)'}`,
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span
+                            className="text-sm"
+                            style={{ color: isSelected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.78)' }}
+                          >
+                            {opt.label}
+                          </span>
+                          <span
+                            className="font-oswald text-[13px] tracking-wide"
+                            style={{ color: isSelected ? accentColor : 'rgba(255,255,255,0.55)' }}
+                          >
+                            {formatMetricPct(opt.pct)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
-            </div>
-
-            <div>
-              <label className="text-[10px] tracking-[0.12em] uppercase text-white/40 mb-2 block">
-                Threshold: {targetThreshold}%
-              </label>
-              <input
-                type="range"
-                min={20}
-                max={80}
-                step={5}
-                value={targetThreshold}
-                onChange={(e) => setTargetThreshold(Number(e.target.value))}
-                className="w-full accent-current"
-                style={{ accentColor }}
-              />
-              <div className="flex justify-between text-[9px] text-white/25 mt-1">
-                <span>20%</span>
-                <span>50%</span>
-                <span>80%</span>
-              </div>
+              {!hasMetricOptions && (
+                <div className="text-[11px] text-white/45 mt-2">
+                  No selectable deep-analysis target is currently available for {teamName}. This
+                  team&apos;s major outcomes are currently locked at 0% or 100%.
+                </div>
+              )}
             </div>
 
             <button
@@ -385,7 +422,7 @@ export default function DeepAnalysisModal({
           </span>
           <span className="text-[10px] text-white/20">&middot;</span>
           <span className="text-[10px] text-white/25">
-            {analysis.targetMetric === 'championPct' ? 'Champion' : analysis.targetMetric === 'relegationPct' ? `Relegation \u2264 ${analysis.targetThreshold}%` : `${analysis.targetMetric.replace('Pct', '').replace('top', 'Top ')} \u2265 ${analysis.targetThreshold}%`}
+            {getTargetMetricLabel(analysis.targetMetric)}
           </span>
           {cacheStatus === 'hit' && (
             <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-200/90">

@@ -9,7 +9,6 @@ const TABLE_NAME = 'deep_analysis_reports';
 interface ScenarioKeyInput {
   targetTeam: string;
   targetMetric: string;
-  targetThreshold: number;
   teams: Team[];
   fixtures: Fixture[];
 }
@@ -18,14 +17,12 @@ interface CacheLookupParams {
   scenarioKey: string;
   targetTeam: string;
   targetMetric: string;
-  targetThreshold: number;
 }
 
 interface CacheWriteParams {
   scenarioKey: string;
   targetTeam: string;
   targetMetric: string;
-  targetThreshold: number;
   analysis: DeepAnalysis;
   pathResult: unknown;
   aiWarning: string;
@@ -91,7 +88,6 @@ export function createDeepAnalysisScenarioKey(input: ScenarioKeyInput): string {
     version: 1,
     targetTeam: input.targetTeam,
     targetMetric: input.targetMetric,
-    targetThreshold: input.targetThreshold,
     teams: normalizeTeamsForKey(input.teams),
     fixtures: normalizeFixturesForKey(input.fixtures),
   };
@@ -128,7 +124,6 @@ export async function getCachedDeepAnalysis({
   scenarioKey,
   targetTeam,
   targetMetric,
-  targetThreshold,
 }: CacheLookupParams): Promise<CachedDeepAnalysisRecord | null> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) return null;
@@ -166,7 +161,6 @@ export async function getCachedDeepAnalysis({
     .select('analysis, path_result, ai_warning, generated_at')
     .eq('target_team', targetTeam)
     .eq('target_metric', targetMetric)
-    .eq('target_threshold', targetThreshold)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -193,7 +187,6 @@ export async function upsertDeepAnalysisCache({
   scenarioKey,
   targetTeam,
   targetMetric,
-  targetThreshold,
   analysis,
   pathResult,
   aiWarning,
@@ -205,7 +198,6 @@ export async function upsertDeepAnalysisCache({
     scenario_key: scenarioKey,
     target_team: targetTeam,
     target_metric: targetMetric,
-    target_threshold: targetThreshold,
     analysis,
     path_result: pathResult,
     ai_warning: aiWarning,

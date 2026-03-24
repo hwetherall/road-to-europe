@@ -34,3 +34,40 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Deep Analysis Shared Cache (Supabase)
+
+Deep Analysis reports can be reused across users/devices when the same scenario is requested.
+The cache key includes:
+
+- target team
+- target metric + threshold
+- normalized standings + fixtures + probabilities snapshot
+
+If data has not changed, the API returns the saved report immediately. Users can still click
+`Regenerate Fresh` to force a new report and overwrite the cached version.
+
+### 1) Add environment variables
+
+Set these in your deployment (and local `.env` if needed):
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` must stay server-side only. Never expose it in client code.
+
+### 2) Create cache table
+
+Run the SQL migration in:
+
+`supabase/migrations/20260323_deep_analysis_reports.sql`
+
+This creates `public.deep_analysis_reports` and indexes needed for scenario lookup/upsert.
+
+### 3) Behavior
+
+- Cache hit: returns saved report (`cacheStatus: hit`) in seconds.
+- Cache miss: generates report, stores it, returns (`cacheStatus: miss`).
+- Force refresh: generates fresh report and updates saved record (`cacheStatus: refreshed`).

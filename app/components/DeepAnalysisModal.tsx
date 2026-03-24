@@ -1,7 +1,14 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Team, Fixture, SensitivityResult, DeepAnalysis, SensitivityMetric } from '@/lib/types';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  Team,
+  Fixture,
+  SensitivityResult,
+  DeepAnalysis,
+  SensitivityMetric,
+  SimulationResult,
+} from '@/lib/types';
 import DeepAnalysisLoader from './DeepAnalysisLoader';
 import DeepAnalysisContent from './DeepAnalysisContent';
 import DeepAnalysisChat from './DeepAnalysisChat';
@@ -14,8 +21,23 @@ interface Props {
   selectedTeam: string;
   teams: Team[];
   fixtures: Fixture[];
+  selectedTeamResult: DeepAnalysisMetricResult | null;
   sensitivityResults: SensitivityResult[] | null;
   sensitivityMetric: SensitivityMetric;
+}
+
+type DeepAnalysisMetric = Exclude<SensitivityMetric, 'survivalPct'>;
+
+type DeepAnalysisMetricResult = Pick<SimulationResult, DeepAnalysisMetric>;
+
+const DEEP_ANALYSIS_MIN_COMPETITIVE_PCT = 2;
+const DEEP_ANALYSIS_MAX_COMPETITIVE_PCT = 98;
+
+function isCompetitiveMetric(value: number): boolean {
+  return (
+    value >= DEEP_ANALYSIS_MIN_COMPETITIVE_PCT &&
+    value <= DEEP_ANALYSIS_MAX_COMPETITIVE_PCT
+  );
 }
 
 export default function DeepAnalysisModal({
@@ -26,6 +48,7 @@ export default function DeepAnalysisModal({
   selectedTeam,
   teams,
   fixtures,
+  selectedTeamResult,
   sensitivityResults,
   sensitivityMetric,
 }: Props) {
@@ -33,11 +56,36 @@ export default function DeepAnalysisModal({
   const [fadeIn, setFadeIn] = useState(false);
   const [analysis, setAnalysis] = useState<DeepAnalysis | null>(null);
   const [error, setError] = useState<string>('');
+  const [warning, setWarning] = useState<string>('');
+  const [cacheStatus, setCacheStatus] = useState<'hit' | 'miss' | 'refreshed' | ''>('');
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
+  const [cacheEnabled, setCacheEnabled] = useState<boolean>(true);
   const [targetMetric, setTargetMetric] = useState<string>(sensitivityMetric);
   const [targetThreshold, setTargetThreshold] = useState(50);
   const abortRef = useRef<AbortController | null>(null);
 
   const teamName = teams.find((t) => t.abbr === selectedTeam)?.name ?? selectedTeam;
+  const allMetricOptions = useMemo(
+    (): { value: DeepAnalysisMetric; label: string }[] => [
+      { value: 'championPct', label: 'League Champion (1st)' },
+      { value: 'top4Pct', label: 'Champions League (Top 4)' },
+      { value: 'top5Pct', label: 'UCL Expanded (Top 5)' },
+      { value: 'top6Pct', label: 'Europa League (Top 6)' },
+      { value: 'top7Pct', label: 'Any Europe (Top 7)' },
+      { value: 'relegationPct', label: 'Relegation (Bottom 3)' },
+    ],
+    []
+  );
+  const metricOptions = useMemo(
+    () =>
+      selectedTeamResult
+        ? allMetricOptions.filter((option) =>
+            isCompetitiveMetric(selectedTeamResult[option.value])
+          )
+        : allMetricOptions,
+    [allMetricOptions, selectedTeamResult]
+  );
+  const hasMetricOptions = metricOptions.length > 0;
 
   // Reset when opened
   useEffect(() => {
@@ -46,6 +94,10 @@ export default function DeepAnalysisModal({
       setFadeIn(false);
       setAnalysis(null);
       setError('');
+      setWarning('');
+      setCacheStatus('');
+      setCachedAt(null);
+      setCacheEnabled(true);
       setTargetMetric(sensitivityMetric);
     } else {
       // Abort any in-flight request
@@ -53,9 +105,20 @@ export default function DeepAnalysisModal({
     }
   }, [open, sensitivityMetric]);
 
-  const handleGenerate = useCallback(async () => {
+  useEffect(() => {
+    if (!open || !hasMetricOptions) return;
+    const hasSelectedMetric = metricOptions.some((option) => option.value === targetMetric);
+    if (!hasSelectedMetric) {
+      setTargetMetric(metricOptions[0].value);
+    }
+  }, [open, targetMetric, metricOptions, hasMetricOptions]);
+
+  const handleGenerate = useCallback(async (forceRefresh = false) => {
     setPhase('loading');
     setError('');
+    setWarning('');
+    setCacheStatus('');
+    setCachedAt(null);
 
     abortRef.current = new AbortController();
 
@@ -69,6 +132,7 @@ export default function DeepAnalysisModal({
           targetThreshold,
           teams,
           fixtures,
+          forceRefresh,
         }),
         signal: abortRef.current.signal,
       });
@@ -80,6 +144,14 @@ export default function DeepAnalysisModal({
 
       const data = await res.json();
       setAnalysis(data.analysis);
+      setWarning(typeof data.aiWarning === 'string' ? data.aiWarning : '');
+      setCacheStatus(
+        data.cacheStatus === 'hit' || data.cacheStatus === 'miss' || data.cacheStatus === 'refreshed'
+          ? data.cacheStatus
+          : ''
+      );
+      setCachedAt(typeof data.cachedAt === 'number' ? data.cachedAt : null);
+      setCacheEnabled(typeof data.cacheEnabled === 'boolean' ? data.cacheEnabled : true);
       setPhase('ready');
       requestAnimationFrame(() => setFadeIn(true));
     } catch (e) {
@@ -114,15 +186,6 @@ export default function DeepAnalysisModal({
 
   // ── Config Panel ──
   if (phase === 'config') {
-    const metricOptions: { value: string; label: string }[] = [
-      { value: 'championPct', label: 'League Champion (1st)' },
-      { value: 'top4Pct', label: 'Champions League (Top 4)' },
-      { value: 'top5Pct', label: 'UCL Expanded (Top 5)' },
-      { value: 'top6Pct', label: 'Europa League (Top 6)' },
-      { value: 'top7Pct', label: 'Any Europe (Top 7)' },
-      { value: 'relegationPct', label: 'Relegation (Bottom 3)' },
-    ];
-
     return (
       <div className="fixed inset-0 z-[100] bg-[#050505]/95 flex items-center justify-center">
         <div className="relative z-10 w-full max-w-md px-8">
@@ -146,6 +209,7 @@ export default function DeepAnalysisModal({
               <select
                 value={targetMetric}
                 onChange={(e) => setTargetMetric(e.target.value)}
+                disabled={!hasMetricOptions}
                 className="w-full bg-white/[0.04] border border-white/[0.1] rounded-lg px-3 py-2.5 text-sm text-white/80 outline-none focus:border-white/20"
               >
                 {metricOptions.map((opt) => (
@@ -154,6 +218,12 @@ export default function DeepAnalysisModal({
                   </option>
                 ))}
               </select>
+              {!hasMetricOptions && (
+                <div className="text-[11px] text-white/45 mt-2">
+                  No meaningful deep-analysis target is currently available for {teamName}. This
+                  team&apos;s major outcomes are close to locked in.
+                </div>
+              )}
             </div>
 
             <div>
@@ -178,12 +248,14 @@ export default function DeepAnalysisModal({
             </div>
 
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
+              disabled={!hasMetricOptions}
               className="w-full py-3 rounded-lg font-oswald text-sm font-bold tracking-widest uppercase transition-all cursor-pointer"
               style={{
                 background: `linear-gradient(135deg, ${accentColor}40, ${accentColor}20)`,
                 border: `1px solid ${accentColor}50`,
                 color: accentColor,
+                opacity: hasMetricOptions ? 1 : 0.45,
               }}
             >
               Generate Analysis
@@ -256,16 +328,35 @@ export default function DeepAnalysisModal({
           <span className="text-[10px] text-white/25">
             {analysis.targetMetric === 'championPct' ? 'Champion' : analysis.targetMetric === 'relegationPct' ? `Relegation \u2264 ${analysis.targetThreshold}%` : `${analysis.targetMetric.replace('Pct', '').replace('top', 'Top ')} \u2265 ${analysis.targetThreshold}%`}
           </span>
+          {cacheStatus === 'hit' && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-200/90">
+              Cached
+            </span>
+          )}
+          {cacheStatus === 'refreshed' && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full border border-sky-300/30 bg-sky-300/10 text-sky-200/90">
+              Fresh
+            </span>
+          )}
         </div>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors cursor-pointer"
-          title="Close"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M3 3L11 11M11 3L3 11" stroke="rgba(255,255,255,0.4)" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleGenerate(true)}
+            className="h-8 px-3 rounded-lg text-[10px] tracking-[0.08em] uppercase text-white/65 hover:text-white/85 border border-white/[0.12] hover:border-white/[0.2] transition-colors cursor-pointer"
+            title="Regenerate a fresh deep analysis"
+          >
+            Regenerate Fresh
+          </button>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-white/[0.06] transition-colors cursor-pointer"
+            title="Close"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M3 3L11 11M11 3L3 11" stroke="rgba(255,255,255,0.4)" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Main content area */}
@@ -274,6 +365,22 @@ export default function DeepAnalysisModal({
       >
         {/* Analysis content — scrollable */}
         <div className="flex-1 overflow-y-auto px-6 lg:px-10 min-w-0">
+          {warning && (
+            <div className="mt-4 mb-3 rounded-lg border border-amber-400/35 bg-amber-400/10 px-4 py-3 text-[12px] text-amber-200/90">
+              {warning}
+            </div>
+          )}
+          {!cacheEnabled && (
+            <div className="mt-4 mb-3 rounded-lg border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-[12px] text-sky-100/90">
+              Shared report caching is not configured on this deployment yet. Add `SUPABASE_URL`
+              and `SUPABASE_SERVICE_ROLE_KEY` to enable cross-device saved reports.
+            </div>
+          )}
+          {cachedAt && (
+            <div className="mt-4 mb-3 rounded-lg border border-white/[0.1] bg-white/[0.03] px-4 py-2 text-[11px] text-white/55">
+              Report timestamp: {new Date(cachedAt).toLocaleString('en-GB')}
+            </div>
+          )}
           <DeepAnalysisContent
             accentColor={accentColor}
             textAccentColor={textAccentColor}

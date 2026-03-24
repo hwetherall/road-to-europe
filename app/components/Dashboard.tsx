@@ -793,6 +793,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         selectedTeam={selectedTeam}
         teams={teams}
         fixtures={allFixtures}
+        selectedTeamResult={baselineTeamResult}
         sensitivityResults={sensitivityResults}
         sensitivityMetric={sensitivityMetric}
       />

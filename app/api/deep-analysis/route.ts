@@ -174,10 +174,44 @@ function formatCandidatePath(path: CandidatePath, index: number): string {
 ${path.locks.map((l) => `  - ${l.homeTeam} vs ${l.awayTeam}: ${l.resultLabel}`).join('\n')}`;
 }
 
-function formatSensitivity(s: SensitivityResult): string {
+function getTeamStatusLabel(position: number): string {
+  if (position <= 1) return 'title race';
+  if (position <= 4) return 'Champions League contender';
+  if (position <= 7) return 'European contender';
+  if (position <= 14) return 'mid-table';
+  if (position <= 17) return 'relegation threatened';
+  return 'relegation zone';
+}
+
+function formatSensitivity(s: SensitivityResult, sortedTeams?: Team[]): string {
   const best = Math.max(s.deltaIfHomeWin, s.deltaIfDraw, s.deltaIfAwayWin);
   const worst = Math.min(s.deltaIfHomeWin, s.deltaIfDraw, s.deltaIfAwayWin);
-  return `  ${s.homeTeam} vs ${s.awayTeam}: best +${best.toFixed(1)}pp / worst ${worst.toFixed(1)}pp`;
+
+  if (!sortedTeams) {
+    return `  ${s.homeTeam} vs ${s.awayTeam}: best +${best.toFixed(1)}pp / worst ${worst.toFixed(1)}pp`;
+  }
+
+  const homeIdx = sortedTeams.findIndex(t => t.abbr === s.homeTeam);
+  const awayIdx = sortedTeams.findIndex(t => t.abbr === s.awayTeam);
+  const homePos = homeIdx >= 0 ? homeIdx + 1 : null;
+  const awayPos = awayIdx >= 0 ? awayIdx + 1 : null;
+  const homePts = homePos ? sortedTeams[homeIdx].points : null;
+  const awayPts = awayPos ? sortedTeams[awayIdx].points : null;
+  const homeLabel = homePos ? getTeamStatusLabel(homePos) : '';
+  const awayLabel = awayPos ? getTeamStatusLabel(awayPos) : '';
+
+  return `  ${s.homeTeam} (${homePos ? `${homePos}th, ${homePts}pts, ${homeLabel}` : 'unknown'}) vs ${s.awayTeam} (${awayPos ? `${awayPos}th, ${awayPts}pts, ${awayLabel}` : 'unknown'}): best +${best.toFixed(1)}pp / worst ${worst.toFixed(1)}pp`;
+}
+
+function formatStandingsTable(sortedTeams: Team[]): string {
+  const header = 'Pos | Team | Pts | GD | P | W | D | L';
+  const separator = '--- | ---- | --- | -- | - | - | - | -';
+  const rows = sortedTeams.map((t, i) => {
+    const pos = i + 1;
+    const label = getTeamStatusLabel(pos);
+    return `${pos} | ${t.name} (${t.abbr}) | ${t.points} | ${t.goalDifference >= 0 ? '+' : ''}${t.goalDifference} | ${t.played} | ${t.won} | ${t.drawn} | ${t.lost} | ${label}`;
+  });
+  return [header, separator, ...rows].join('\n');
 }
 
 // ── Two-Phase Narrative Pipeline ──
@@ -302,7 +336,8 @@ function buildWritingPrompt(
   points: number,
   gapToTarget: number,
   gamesRemaining: number,
-  factSheet: string
+  factSheet: string,
+  sortedTeams: Team[]
 ): string {
   const isRelegation = config.targetMetric === 'relegationPct';
   const isChampion = config.targetMetric === 'championPct';
@@ -339,8 +374,11 @@ Combined plausibility: ${(pathResult.optimalPath.compositePlausibility * 100).to
 Candidate paths (plausible scenarios):
 ${pathResult.candidatePaths.map(formatCandidatePath).join('\n\n')}
 
-Top sensitivity fixtures:
-${pathResult.sensitivityData.slice(0, 10).map(formatSensitivity).join('\n')}
+## FULL LEAGUE STANDINGS (use this to verify team motivations)
+${formatStandingsTable(sortedTeams)}
+
+Top sensitivity fixtures (NOTE: sensitivity measures impact on ${teamName}'s odds, NOT the competitiveness of the fixture — a one-sided match can still be high-leverage):
+${pathResult.sensitivityData.slice(0, 10).map(s => formatSensitivity(s, sortedTeams)).join('\n')}
 
 Decisive match: ${decisiveHome} vs ${decisiveAway} (fixture ID: ${decisive?.fixtureId ?? ''})
 
@@ -450,7 +488,9 @@ Return a JSON object wrapped in \`\`\`json blocks. Match this exact structure:
 3. NEVER repeat stat-pill numbers (position, points, gap, baseline odds) in the contextNarrative — the UI already displays these prominently.
 4. "risks" are about the OPPONENT's threat to ${teamName}. "angles" are about ${teamName}'s opportunity against the opponent. Don't mix them up.
 5. Every "angle" must contain a TACTICAL MECHANISM. "Good away form" is NOT an angle. "Counter-pressing system suits away fixtures because it invites pressure then exploits the space behind the opponent's committed full-backs" IS an angle.
-6. ${isRelegation ? 'This is a RELEGATION analysis. Frame everything through the lens of survival: points needed, safety margins, "must-not-lose" fixtures. The tone should acknowledge the precariousness without being fatalistic.' : isChampion ? 'This is a TITLE analysis. Frame everything through the lens of maintaining/closing the gap, and rivals dropping points.' : 'This is a EUROPEAN QUALIFICATION analysis. Frame everything through the lens of climbing the table and overhauling the teams above.'}`;
+6. ${isRelegation ? 'This is a RELEGATION analysis. Frame everything through the lens of survival: points needed, safety margins, "must-not-lose" fixtures. The tone should acknowledge the precariousness without being fatalistic.' : isChampion ? 'This is a TITLE analysis. Frame everything through the lens of maintaining/closing the gap, and rivals dropping points.' : 'This is a EUROPEAN QUALIFICATION analysis. Frame everything through the lens of climbing the table and overhauling the teams above.'}
+7. VERIFY TEAM MOTIVATIONS AGAINST THE STANDINGS TABLE. Before claiming a team is "in the European race", "fighting for the title", "battling relegation", or has any competitive motivation, CHECK their actual league position in the standings table above. A 17th-placed team is NOT in a European race. A 3rd-placed team is NOT in a relegation battle. Get this right — it destroys credibility when you get it wrong.
+8. SENSITIVITY ≠ COMPETITIVENESS. A fixture appearing in the sensitivity data means its result significantly affects ${teamName}'s odds — it does NOT mean the fixture is closely matched or competitive. A dominant favourite beating a bottom-half team can be high-leverage. Do not describe a fixture as "competitive" or "closely contested" based solely on its presence in sensitivity data. Check the standings and form data to make actual competitiveness claims.`;
 }
 
 async function runResearchPhase(
@@ -534,6 +574,153 @@ async function runResearchPhase(
   return { factSheet: factMatch ? factMatch[1].trim() : content, sources, searchCount };
 }
 
+// ── Deterministic Post-Generation Validation ──
+// Checks the generated analysis against hard facts (standings, sensitivity data)
+// and returns specific violations that can be used to request corrections.
+
+interface ValidationViolation {
+  field: string;       // JSON path to the problematic field
+  claim: string;       // What the text claims
+  reality: string;     // What the data actually says
+  severity: 'high' | 'medium';
+}
+
+const MOTIVATION_PATTERNS: { pattern: RegExp; minPos?: number; maxPos?: number; label: string }[] = [
+  { pattern: /\b(?:European|Europa|Champions League|UCL|Conference League)\s*(?:race|push|chase|contend|hunt|bid|ambition|qualification|spot|place)/i, maxPos: 10, label: 'European contention' },
+  { pattern: /\b(?:title|championship)\s*(?:race|push|chase|contend|hunt|bid|ambition|challenge)/i, maxPos: 5, label: 'title contention' },
+  { pattern: /\b(?:relegation|survival|drop|go down)\s*(?:battle|fight|scrap|threat|danger|fear|risk)/i, minPos: 12, label: 'relegation battle' },
+  { pattern: /\bnothing to play for\b/i, minPos: 8, maxPos: 17, label: 'nothing to play for' },
+];
+
+function validateAnalysis(
+  analysis: Partial<DeepAnalysis>,
+  sortedTeams: Team[],
+  sensitivityData: SensitivityResult[]
+): ValidationViolation[] {
+  const violations: ValidationViolation[] = [];
+
+  // Build a lookup: abbr → position
+  const positionMap = new Map<string, number>();
+  const nameToAbbr = new Map<string, string>();
+  sortedTeams.forEach((t, i) => {
+    positionMap.set(t.abbr, i + 1);
+    positionMap.set(t.name.toLowerCase(), i + 1);
+    nameToAbbr.set(t.name.toLowerCase(), t.abbr);
+  });
+
+  // Collect all text fields from the analysis to scan
+  const textFields: { path: string; text: string }[] = [];
+
+  if (analysis.stateOfPlay?.contextNarrative) {
+    textFields.push({ path: 'stateOfPlay.contextNarrative', text: analysis.stateOfPlay.contextNarrative });
+  }
+  if (analysis.decisiveMatch?.risks) {
+    analysis.decisiveMatch.risks.forEach((r, i) => {
+      textFields.push({ path: `decisiveMatch.risks[${i}]`, text: r });
+    });
+  }
+  if (analysis.decisiveMatch?.angles) {
+    analysis.decisiveMatch.angles.forEach((a, i) => {
+      textFields.push({ path: `decisiveMatch.angles[${i}]`, text: `${a.title} ${a.analysis}` });
+    });
+  }
+  if (analysis.decisiveMatch?.whatToWatch) {
+    analysis.decisiveMatch.whatToWatch.forEach((w, i) => {
+      textFields.push({ path: `decisiveMatch.whatToWatch[${i}]`, text: w });
+    });
+  }
+  if (analysis.matchesToWatch) {
+    analysis.matchesToWatch.forEach((m, i) => {
+      textFields.push({ path: `matchesToWatch[${i}].whyItMatters`, text: m.whyItMatters });
+      textFields.push({ path: `matchesToWatch[${i}].whyItsPlausible`, text: m.whyItsPlausible });
+    });
+  }
+  if (analysis.bottomLine) {
+    textFields.push({ path: 'bottomLine.summary', text: analysis.bottomLine.summary });
+    textFields.push({ path: 'bottomLine.keyScenario', text: analysis.bottomLine.keyScenario });
+  }
+
+  // Check each text field for motivation claims that don't match standings
+  for (const { path, text } of textFields) {
+    // For each team name found in the text, check motivation claims
+    for (const team of sortedTeams) {
+      const teamNameLower = team.name.toLowerCase();
+      const textLower = text.toLowerCase();
+
+      // Only check if this team is actually mentioned in this text
+      if (!textLower.includes(teamNameLower) && !textLower.includes(team.abbr.toLowerCase())) {
+        continue;
+      }
+
+      const teamPos = positionMap.get(team.abbr) ?? 99;
+
+      for (const mp of MOTIVATION_PATTERNS) {
+        if (!mp.pattern.test(text)) continue;
+
+        // Check if the motivation claim is near the team mention (within ~200 chars)
+        const teamIdx = Math.max(
+          textLower.indexOf(teamNameLower),
+          textLower.indexOf(team.abbr.toLowerCase())
+        );
+        const patternMatch = text.match(mp.pattern);
+        if (!patternMatch) continue;
+        const patternIdx = text.indexOf(patternMatch[0]);
+        if (Math.abs(teamIdx - patternIdx) > 200) continue;
+
+        // Check if position is plausible for this claim
+        if (mp.maxPos && teamPos > mp.maxPos) {
+          violations.push({
+            field: path,
+            claim: `${team.name} described as being in ${mp.label}`,
+            reality: `${team.name} are actually ${teamPos}th in the table with ${team.points} points — ${mp.label} is not a credible description of their situation`,
+            severity: 'high',
+          });
+        }
+        if (mp.minPos && teamPos < mp.minPos) {
+          violations.push({
+            field: path,
+            claim: `${team.name} described as being in ${mp.label}`,
+            reality: `${team.name} are actually ${teamPos}th in the table with ${team.points} points — ${mp.label} is not a credible description of their situation`,
+            severity: 'high',
+          });
+        }
+      }
+    }
+  }
+
+  // Check matchesToWatch simulation impact values against actual sensitivity data
+  if (analysis.matchesToWatch) {
+    for (let i = 0; i < analysis.matchesToWatch.length; i++) {
+      const match = analysis.matchesToWatch[i];
+      const sensEntry = sensitivityData.find(s => s.fixtureId === match.fixtureId);
+
+      if (sensEntry && match.simulationImpact) {
+        // Parse the claimed impact (e.g., "+4.2pp" or "-3.1pp")
+        const claimedMatch = match.simulationImpact.match(/([+-]?\d+\.?\d*)\s*pp/);
+        if (claimedMatch) {
+          const claimedValue = parseFloat(claimedMatch[1]);
+          const actualMax = Math.max(
+            Math.abs(sensEntry.deltaIfHomeWin),
+            Math.abs(sensEntry.deltaIfDraw),
+            Math.abs(sensEntry.deltaIfAwayWin)
+          );
+          // Allow some rounding tolerance but flag large discrepancies
+          if (Math.abs(Math.abs(claimedValue) - actualMax) > 2.0) {
+            violations.push({
+              field: `matchesToWatch[${i}].simulationImpact`,
+              claim: `Simulation impact stated as ${match.simulationImpact}`,
+              reality: `Actual max sensitivity delta is ${actualMax.toFixed(1)}pp (home: ${sensEntry.deltaIfHomeWin.toFixed(1)}, draw: ${sensEntry.deltaIfDraw.toFixed(1)}, away: ${sensEntry.deltaIfAwayWin.toFixed(1)})`,
+              severity: 'medium',
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
 async function runWritingPhase(
   pathResult: PathSearchResult,
   config: PathSearchConfig,
@@ -542,10 +729,11 @@ async function runWritingPhase(
   points: number,
   gapToTarget: number,
   gamesRemaining: number,
-  factSheet: string
+  factSheet: string,
+  sortedTeams: Team[]
 ): Promise<Partial<DeepAnalysis>> {
   const systemPrompt = buildWritingPrompt(
-    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, factSheet
+    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, factSheet, sortedTeams
   );
 
   const conversation: OpenRouterMessage[] = [
@@ -557,26 +745,68 @@ async function runWritingPhase(
   const content = message.content ?? '';
 
   // Parse JSON
+  let analysis: Partial<DeepAnalysis> | null = null;
   const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonMatch) {
     try {
-      return JSON.parse(jsonMatch[1]);
+      analysis = JSON.parse(jsonMatch[1]);
     } catch (e) {
       console.error('Failed to parse writing phase JSON:', e);
     }
   }
 
   // Fallback: find any JSON object
-  const fallbackMatch = content.match(/\{[\s\S]*\}/);
-  if (fallbackMatch) {
-    try {
-      return JSON.parse(fallbackMatch[0]);
-    } catch {
-      // give up
+  if (!analysis) {
+    const fallbackMatch = content.match(/\{[\s\S]*\}/);
+    if (fallbackMatch) {
+      try {
+        analysis = JSON.parse(fallbackMatch[0]);
+      } catch {
+        // give up
+      }
     }
   }
 
-  return {};
+  if (!analysis) return {};
+
+  // ── Post-generation validation ──
+  const violations = validateAnalysis(analysis, sortedTeams, pathResult.sensitivityData);
+  const highSeverity = violations.filter(v => v.severity === 'high');
+
+  if (highSeverity.length > 0) {
+    console.log(`[Deep Analysis] Found ${highSeverity.length} high-severity violations, requesting corrections`);
+
+    // Build a correction prompt with specific violations
+    const correctionList = highSeverity.map((v, i) =>
+      `${i + 1}. In "${v.field}": You wrote that ${v.claim}. CORRECTION: ${v.reality}. Rewrite this section to fix the error.`
+    ).join('\n');
+
+    conversation.push(message);
+    conversation.push({
+      role: 'user',
+      content: `Your analysis contains factual errors that contradict the league standings. Fix ONLY these specific errors and return the complete corrected JSON. Do not change anything else.\n\n${correctionList}\n\nReturn the corrected full JSON wrapped in \`\`\`json blocks.`,
+    });
+
+    const correctedMessage = await callOpenRouter(conversation, [], 8000);
+    const correctedContent = correctedMessage.content ?? '';
+
+    const correctedMatch = correctedContent.match(/```json\s*([\s\S]*?)\s*```/);
+    if (correctedMatch) {
+      try {
+        const corrected = JSON.parse(correctedMatch[1]);
+        // Validate again — if still bad, use it anyway (one retry max)
+        const remainingViolations = validateAnalysis(corrected, sortedTeams, pathResult.sensitivityData);
+        if (remainingViolations.filter(v => v.severity === 'high').length > 0) {
+          console.log(`[Deep Analysis] ${remainingViolations.filter(v => v.severity === 'high').length} violations remain after correction — using corrected version anyway`);
+        }
+        return corrected;
+      } catch {
+        console.error('[Deep Analysis] Failed to parse corrected JSON, using original');
+      }
+    }
+  }
+
+  return analysis;
 }
 
 async function narrateAnalysis(
@@ -586,7 +816,8 @@ async function narrateAnalysis(
   position: number,
   points: number,
   gapToTarget: number,
-  gamesRemaining: number
+  gamesRemaining: number,
+  sortedTeams: Team[]
 ): Promise<{ analysis: Partial<DeepAnalysis>; sources: string[]; searchCount: number }> {
   // ── Tier 1: Deep research (decisive match teams + target team) ──
   const tier1Teams = new Set<string>();
@@ -627,7 +858,7 @@ async function narrateAnalysis(
 
   // Phase B: Write
   const analysis = await runWritingPhase(
-    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, combinedFactSheet
+    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, combinedFactSheet, sortedTeams
   );
 
   return { analysis, sources: allSources, searchCount: totalSearchCount };
@@ -793,7 +1024,8 @@ export async function POST(req: NextRequest) {
           position,
           teamPoints,
           gapToTarget,
-          gamesRemaining
+          gamesRemaining,
+          sortedTeams
         );
         narrativeData = result.analysis;
         sources = result.sources;

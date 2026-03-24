@@ -185,3 +185,38 @@ export interface DeepAnalysis {
   sources: string[];
   searchBudgetUsed: number;
 }
+
+// ── Pundit Panel ──
+
+export type PunditArchetype =
+  | 'analyst'
+  | 'coach'
+  | 'fan'
+  | 'banter_merchant'
+  | 'skeptic';
+
+export type PunditImpact = 'positive' | 'negative' | 'neutral';
+
+export interface PunditFixtureContext {
+  fixtureId: string;
+  homeTeam: string;
+  awayTeam: string;
+  date?: string;
+}
+
+export interface PunditSensitivitySnapshot {
+  fixtureId: string;
+  homeTeam: string;
+  awayTeam: string;
+  maxAbsDelta: number;
+}
+
+export interface PunditTake {
+  archetype: PunditArchetype;
+  targetTeam: string;
+  fixtureId: string;
+  takeText: string;
+  impactOnTargetTeam: PunditImpact;
+  watchFor: string;
+  confidence: 1 | 2 | 3 | 4 | 5;
+}

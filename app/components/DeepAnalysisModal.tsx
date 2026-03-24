@@ -12,6 +12,7 @@ import {
 import DeepAnalysisLoader from './DeepAnalysisLoader';
 import DeepAnalysisContent from './DeepAnalysisContent';
 import DeepAnalysisChat from './DeepAnalysisChat';
+import DeepAnalysisPunditPanel from './DeepAnalysisPunditPanel';
 
 interface Props {
   open: boolean;
@@ -432,6 +433,17 @@ export default function DeepAnalysisModal({
       <div
         className={`flex h-[calc(100vh-48px)] transition-opacity duration-500 ${fadeIn ? 'opacity-100' : 'opacity-0'}`}
       >
+        {/* Pundit panel — left side */}
+        <div className="w-[320px] shrink-0 border-r border-white/[0.06] hidden lg:flex flex-col">
+          <DeepAnalysisPunditPanel
+            analysis={analysis}
+            selectedTeam={selectedTeam}
+            teamName={teamName}
+            sensitivityResults={sensitivityResults}
+            accentColor={accentColor}
+          />
+        </div>
+
         {/* Analysis content — scrollable */}
         <div className="flex-1 overflow-y-auto px-6 lg:px-10 min-w-0">
           {warning && (

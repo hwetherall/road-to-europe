@@ -11,6 +11,7 @@ interface Props {
   isOpen: boolean;
   kyleMode?: boolean;
   onExitKyleMode?: () => void;
+  onClose?: () => void;
   chapters: Chapter[];
   onAddChapter: (chapter: Chapter) => void;
   onRemoveChapter: (id: string) => void;
@@ -28,6 +29,7 @@ export default function ChatSidebar({
   isOpen,
   kyleMode = false,
   onExitKyleMode,
+  onClose,
   chapters,
   onAddChapter,
   onRemoveChapter,
@@ -309,18 +311,33 @@ export default function ChatSidebar({
         <div className="px-4 py-3 border-b border-white/[0.06] shrink-0">
           <div className="flex items-center justify-between gap-2">
             <div className="font-oswald text-xs tracking-[0.15em] uppercase text-white/50">
-              Scenarios
+              Saved Scenarios
             </div>
-            {kyleMode && onExitKyleMode && (
-              <button
-                type="button"
-                onClick={onExitKyleMode}
-                className="text-[11px] text-white/60 hover:text-white/90 border border-white/[0.14] hover:border-white/[0.24] rounded px-2 py-1 transition-colors cursor-pointer"
-                title="Exit Kyle mode"
-              >
-                Exit Kyle
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {kyleMode && onExitKyleMode && (
+                <button
+                  type="button"
+                  onClick={onExitKyleMode}
+                  className="text-[11px] text-white/60 hover:text-white/90 border border-white/[0.14] hover:border-white/[0.24] rounded px-2 py-1 transition-colors cursor-pointer"
+                  title="Exit focus chat mode"
+                >
+                  Exit Focus
+                </button>
+              )}
+              {onClose && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors cursor-pointer"
+                  title="Close chat"
+                  aria-label="Close chat"
+                >
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M2.5 2.5L10.5 10.5M10.5 2.5L2.5 10.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -336,7 +353,7 @@ export default function ChatSidebar({
 
         <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
           <span className="font-oswald text-[10px] tracking-[0.12em] uppercase text-white/40">
-            Chat
+            Ask Assistant
           </span>
           <button
             type="button"

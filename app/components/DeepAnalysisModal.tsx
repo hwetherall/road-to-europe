@@ -431,12 +431,12 @@ export default function DeepAnalysisModal({
           )}
           {cacheStatus === 'hit' && cacheMatchType === 'exact' && (
             <span className="text-[10px] px-2 py-0.5 rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-200/90">
-              Exact cache
+              Saved report
             </span>
           )}
           {cacheStatus === 'hit' && cacheMatchType === 'scenario_fallback' && (
             <span className="text-[10px] px-2 py-0.5 rounded-full border border-amber-300/30 bg-amber-300/10 text-amber-200/90">
-              Scenario cache
+              Related saved report
             </span>
           )}
           {cacheStatus === 'refreshed' && (
@@ -449,9 +449,9 @@ export default function DeepAnalysisModal({
           <button
             onClick={() => handleGenerate(true)}
             className="h-8 px-3 rounded-lg text-[10px] tracking-[0.08em] uppercase text-white/65 hover:text-white/85 border border-white/[0.12] hover:border-white/[0.2] transition-colors cursor-pointer"
-            title="Regenerate a fresh deep analysis"
+            title="Regenerate a new report"
           >
-            Regenerate Fresh
+            Regenerate Report
           </button>
           <button
             onClick={onClose}

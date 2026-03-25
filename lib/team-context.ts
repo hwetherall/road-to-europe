@@ -81,23 +81,55 @@ function pickPrimaryMetric(
   if (!sim) return defaultMetric;
 
   const EPSILON = 1e-9;
-  const isInteresting = (value: number) => value > 0.1 && value < 99.9;
-  const isPossible = (value: number) => value > EPSILON && value < 100 - EPSILON;
-  const defaultValue = sim[defaultMetric] as number;
-  if (isInteresting(defaultValue)) return defaultMetric;
+  const possible = cards.filter((card) => {
+    const value = sim[card.key] as number;
+    return value > EPSILON && value < 100 - EPSILON;
+  });
 
-  const fallback = cards.find((card) => isInteresting(sim[card.key] as number));
-  if (fallback) {
-    return fallback.key as TeamContext['primaryMetric'];
+  if (possible.length > 0) {
+    const defaultCard = cards.find((card) => card.key === defaultMetric);
+    const ranked = possible
+      .map((card, index) => {
+        const value = sim[card.key] as number;
+        return {
+          card,
+          distanceToFifty: Math.abs(value - 50),
+          index,
+          isDefault: card.key === defaultCard?.key,
+        };
+      })
+      .sort((a, b) => {
+        if (a.distanceToFifty !== b.distanceToFifty) {
+          return a.distanceToFifty - b.distanceToFifty;
+        }
+        if (a.isDefault !== b.isDefault) {
+          return a.isDefault ? -1 : 1;
+        }
+        return a.index - b.index;
+      });
+
+    return ranked[0].card.key as TeamContext['primaryMetric'];
   }
 
-  // If everything is very close to extremes, still avoid hard 0%/100% when possible.
-  const possibleFallback = cards.find((card) => isPossible(sim[card.key] as number));
-  if (possibleFallback) {
-    return possibleFallback.key as TeamContext['primaryMetric'];
-  }
+  // If everything is effectively hard 0/100, prefer the least-extreme option.
+  const leastExtreme = cards
+    .map((card, index) => ({
+      card,
+      distanceToFifty: Math.abs((sim[card.key] as number) - 50),
+      index,
+      isDefault: card.key === defaultMetric,
+    }))
+    .sort((a, b) => {
+      if (a.distanceToFifty !== b.distanceToFifty) {
+        return a.distanceToFifty - b.distanceToFifty;
+      }
+      if (a.isDefault !== b.isDefault) {
+        return a.isDefault ? -1 : 1;
+      }
+      return a.index - b.index;
+    })[0];
 
-  return defaultMetric;
+  return (leastExtreme?.card.key as TeamContext['primaryMetric']) ?? defaultMetric;
 }
 
 function filterCards(cards: CardConfig[], sim?: SimulationResult): CardConfig[] {

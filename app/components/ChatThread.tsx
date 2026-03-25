@@ -157,9 +157,9 @@ export default function ChatThread({ messages, accentColor, onApplyModification,
     return (
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="text-center">
-          <div className="text-white/20 text-sm mb-2">No messages yet</div>
-          <div className="text-white/10 text-xs">
-            Describe a scenario to explore
+          <div className="text-white/25 text-sm mb-2">No messages yet</div>
+          <div className="text-white/20 text-xs">
+            Ask about a match outcome or type a scenario to explore.
           </div>
         </div>
       </div>

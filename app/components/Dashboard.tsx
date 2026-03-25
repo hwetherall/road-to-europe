@@ -83,6 +83,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // Deep Analysis modal state
   const [deepAnalysisOpen, setDeepAnalysisOpen] = useState(false);
+  const [showQuickStart, setShowQuickStart] = useState(false);
 
   // Modified simulation results (with chapters applied)
   const [modifiedSimResults, setModifiedSimResults] = useState<SimulationResult[] | null>(null);
@@ -279,7 +280,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       const modifiedFixtures = applyChapters(allFixtures, chapters);
       const results = simulate(teams, modifiedFixtures, SIM_COUNT);
       setModifiedSimResults(results);
-    }, 300);
+    }, 120);
   }, [activeChapters.length, chapters, allFixtures, teams]);
 
   // Re-run chapter simulation when chapters change
@@ -444,6 +445,20 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     writeKyleState(false);
   }, []);
 
+  const dismissQuickStart = useCallback(() => {
+    setShowQuickStart(false);
+    try {
+      window.localStorage.setItem('keepwatch.quickStartDismissed', '1');
+    } catch {
+      // Ignore storage failures and keep UX functional.
+    }
+  }, []);
+
+  const noteFirstInteraction = useCallback(() => {
+    if (!showQuickStart) return;
+    dismissQuickStart();
+  }, [dismissQuickStart, showQuickStart]);
+
   // Escape key exits Kyle mode (and closes chat)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -466,8 +481,39 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const currentTeam = teams.find((t) => t.abbr === selectedTeam);
   const teamPosition = sortedTeams.findIndex((t) => t.abbr === selectedTeam) + 1;
   const gamesRemaining = currentTeam ? 38 - currentTeam.played : 0;
+  const primaryCard = teamContext?.relevantCards[0] ?? null;
+  const primaryOdds =
+    displayResult && primaryCard ? (displayResult[primaryCard.key] as number) : null;
 
-  const lockCount = Object.keys(locks).length;
+  const currentModeLabel = (() => {
+    if (kyleActive) return 'Focus Chat';
+    if (whatIfActive && sidebarOpen) return 'Match Outcomes + Chat';
+    if (whatIfActive) return 'Match Outcomes';
+    if (sidebarOpen) return 'Chat Assistant';
+    return 'Baseline View';
+  })();
+  const inBaselineView = !kyleActive && !whatIfActive && !sidebarOpen;
+
+  const handleReturnToBaseline = useCallback(() => {
+    setWhatIfActive(false);
+    if (sidebarOpen) {
+      handleChatClose();
+    }
+  }, [sidebarOpen, handleChatClose]);
+
+  const handlePrimaryRun = useCallback(() => {
+    noteFirstInteraction();
+    runSimulation();
+  }, [noteFirstInteraction, runSimulation]);
+
+  useEffect(() => {
+    try {
+      const dismissed = window.localStorage.getItem('keepwatch.quickStartDismissed');
+      setShowQuickStart(dismissed !== '1');
+    } catch {
+      setShowQuickStart(true);
+    }
+  }, []);
 
   return (
     <div
@@ -551,6 +597,40 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         </div>
       </div>
 
+      <div className="border-b border-white/[0.06] bg-[#0b0b0b]">
+        <div className="max-w-[900px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[12px]">
+          <div className="flex items-center gap-2 text-white/55">
+            <span className="text-white/35">You are in:</span>
+            <span className="font-semibold text-white/90">{currentModeLabel}</span>
+            {!inBaselineView && (
+              <button
+                type="button"
+                onClick={handleReturnToBaseline}
+                className="ml-2 px-2.5 py-1 rounded border border-white/[0.16] text-white/70 hover:text-white/90 hover:border-white/[0.3] transition-colors cursor-pointer"
+              >
+                Return to baseline
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-white/65 flex-wrap">
+            {primaryCard && primaryOdds !== null && (
+              <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
+                <span className="text-white/40">Odds</span>
+                <span className="font-semibold text-white/95">{primaryCard.label} {primaryOdds.toFixed(1)}%</span>
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
+              <span className="text-white/40">Remaining</span>
+              <span className="font-semibold text-white/95">{gamesRemaining} fixtures</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
+              <span className="text-white/40">Baseline</span>
+              <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()} sims</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Content area with sidebar */}
       <div className={`flex ${kyleActive ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
         {/* Kyle Mini-Dashboard (left panel in Kyle mode) */}
@@ -577,76 +657,128 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           style={sidebarOpen && !kyleActive ? { marginRight: '380px' } : undefined}
         >
           <div className="max-w-[900px] mx-auto px-4 py-6">
+            {showQuickStart && (
+              <div className="mb-6 rounded-xl border border-teal-400/30 bg-teal-400/[0.07] p-4">
+                <div className="font-oswald text-[12px] tracking-[0.14em] uppercase text-teal-200/90 mb-1">
+                  New here? Start in 3 steps
+                </div>
+                <div className="text-[12px] text-white/65 mb-3">
+                  1) Run the baseline simulation, 2) try match outcomes, 3) ask the chat assistant for scenario ideas.
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handlePrimaryRun}
+                    className="px-4 py-2 rounded-lg text-xs font-bold font-oswald tracking-widest uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
+                  >
+                    Start Guided Simulation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissQuickStart}
+                    className="px-4 py-2 rounded-lg text-xs text-white/60 border border-white/[0.18] hover:text-white/80 hover:border-white/[0.32] transition-colors cursor-pointer"
+                  >
+                    Hide guide
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Toolbar */}
             <div className="flex items-center gap-4 mb-7 flex-wrap">
               <RefreshButton
-                onRefresh={runSimulation}
+                onRefresh={handlePrimaryRun}
                 running={running}
                 hasResults={simResults !== null}
                 fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
                 simCount={SIM_COUNT}
+                tonedDown={showQuickStart}
               />
-              <button
-                onClick={() => {
-                  setWhatIfActive(!whatIfActive);
-                }}
-                className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
-                  whatIfActive
-                    ? 'text-white border-amber-500/50'
-                    : 'bg-transparent text-white/50 border-white/[0.12] hover:border-white/20'
-                }`}
-                style={
-                  whatIfActive
-                    ? { background: 'rgba(245,158,11,0.15)' }
-                    : undefined
-                }
-              >
-                {whatIfActive ? 'Exit What-If' : 'What-If Mode'}
-              </button>
-              <button
-                onClick={() => {
-                  if (sidebarOpen) {
-                    handleChatClose();
-                  } else {
-                    setSidebarOpen(true);
-                  }
-                }}
-                className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer relative ${
-                  sidebarOpen
-                    ? 'text-white'
-                    : 'bg-transparent text-white/50 border-white/[0.12] hover:border-white/20'
-                }`}
-                style={
-                  sidebarOpen
-                    ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
-                    : undefined
-                }
-              >
-                Chat
-                {chapters.length > 0 && !sidebarOpen && (
-                  <span
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                    style={{ background: accentColor }}
-                  >
-                    {chapters.length}
-                  </span>
-                )}
-              </button>
-              <KyleToggle
-                active={kyleActive}
-                onToggle={handleKyleToggle}
-                accentColor={accentColor}
-              />
-              <button
-                onClick={() => setDeepAnalysisOpen(true)}
-                className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/50 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
-              >
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                  <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
-                  <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Deep Analysis
-              </button>
+              <div className="flex items-start gap-3 flex-wrap">
+                <div className="flex flex-col gap-1">
+                  <div className="text-[10px] tracking-[0.12em] uppercase text-white/28 font-oswald px-1">
+                    Explore
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => {
+                        noteFirstInteraction();
+                        setWhatIfActive(!whatIfActive);
+                      }}
+                      className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
+                        whatIfActive
+                          ? 'text-white border-amber-500/50'
+                          : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20'
+                      }`}
+                      style={
+                        whatIfActive
+                          ? { background: 'rgba(245,158,11,0.15)' }
+                          : undefined
+                      }
+                      title="Open match outcomes to lock specific results"
+                    >
+                      {whatIfActive ? 'Exit Match Outcomes' : 'Try Match Outcomes'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        noteFirstInteraction();
+                        if (sidebarOpen) {
+                          handleChatClose();
+                        } else {
+                          setSidebarOpen(true);
+                        }
+                      }}
+                      className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer relative ${
+                        sidebarOpen
+                          ? 'text-white'
+                          : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20'
+                      }`}
+                      style={
+                        sidebarOpen
+                          ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
+                          : undefined
+                      }
+                      title="Open guided scenario chat"
+                    >
+                      Ask Chat
+                      {chapters.length > 0 && !sidebarOpen && (
+                        <span
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
+                          style={{ background: accentColor }}
+                        >
+                          {chapters.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="text-[10px] tracking-[0.12em] uppercase text-white/28 font-oswald px-1">
+                    Advanced
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <KyleToggle
+                      active={kyleActive}
+                      onToggle={handleKyleToggle}
+                      accentColor={accentColor}
+                    />
+                    <button
+                      onClick={() => {
+                        noteFirstInteraction();
+                        setDeepAnalysisOpen(true);
+                      }}
+                      className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/55 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
+                      title="Open a detailed long-form report with key swing fixtures"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                        <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
+                        <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Detailed Report
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {running && phase && (
@@ -680,6 +812,11 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                   selectedTeam={selectedTeam}
                   sensitivityResults={sensitivityResults}
                   teams={teams}
+                  displayResult={displayResult}
+                  baselineResult={baselineTeamResult}
+                  cards={teamContext?.relevantCards ?? []}
+                  hasActiveChapters={hasActiveChapters}
+                  numSims={SIM_COUNT}
                 />
               </div>
             )}
@@ -778,6 +915,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           isOpen={sidebarOpen}
           kyleMode={kyleActive}
           onExitKyleMode={handleExitKyleMode}
+          onClose={handleChatClose}
           chapters={chapters}
           onAddChapter={handleAddChapter}
           onRemoveChapter={handleRemoveChapter}

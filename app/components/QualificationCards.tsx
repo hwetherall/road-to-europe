@@ -21,23 +21,33 @@ function OddsBar({ value, color }: { value: number; color: string }) {
 export default function QualificationCards({ result, cards }: Props) {
   return (
     <div className="mb-8">
-      <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-4">
+      <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/70 mb-1">
         Qualification Odds
       </h2>
+      <div className="text-[12px] text-white/40 mb-4">
+        Current baseline odds from 10,000 season simulations.
+      </div>
       <div className={`grid grid-cols-2 ${cards.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3`}>
-        {cards.map((card) => {
+        {cards.map((card, idx) => {
           const value = result[card.key] as number;
+          const isPrimaryCard = idx === 0;
           return (
             <div
               key={card.key}
-              className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5 text-center"
+              className={`rounded-xl p-5 text-center border ${
+                isPrimaryCard
+                  ? 'bg-white/[0.06] border-white/[0.2]'
+                  : 'bg-white/[0.03] border-white/[0.08]'
+              }`}
             >
-              <div className="text-[11px] text-white/45 tracking-widest uppercase mb-1">
+              <div className="text-[11px] text-white/55 tracking-widest uppercase mb-1">
                 {card.label}
               </div>
-              <div className="text-[10px] text-white/30 mb-3">{card.sub}</div>
+              <div className="text-[10px] text-white/38 mb-3">
+                {isPrimaryCard ? 'Primary watch metric' : card.sub}
+              </div>
               <div
-                className="text-4xl font-extrabold font-oswald leading-none"
+                className={`${isPrimaryCard ? 'text-5xl' : 'text-4xl'} font-extrabold font-oswald leading-none`}
                 style={{ color: card.color }}
               >
                 {value.toFixed(1)}%
@@ -50,12 +60,12 @@ export default function QualificationCards({ result, cards }: Props) {
         })}
       </div>
       {/* Expected final stats */}
-      <div className="flex gap-4 mt-3 text-xs text-white/40">
+      <div className="flex gap-4 mt-3 text-xs text-white/50">
         <span>
-          Avg Points: <span className="text-white/70 font-semibold">{result.avgPoints.toFixed(1)}</span>
+          Expected points: <span className="text-white/80 font-semibold">{result.avgPoints.toFixed(1)}</span>
         </span>
         <span>
-          Avg Position: <span className="text-white/70 font-semibold">{result.avgPosition.toFixed(1)}</span>
+          Expected finish: <span className="text-white/80 font-semibold">{result.avgPosition.toFixed(1)}</span>
         </span>
       </div>
     </div>

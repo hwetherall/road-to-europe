@@ -20,7 +20,7 @@ export default function KyleToggle({ active, onToggle, accentColor }: Props) {
           ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
           : undefined
       }
-      title={active ? 'Exit Kyle mode' : 'Kyle mode — focus chat'}
+      title={active ? 'Exit focus chat mode' : 'Focus chat mode (expands chat workspace)'}
     >
       <svg
         width="16"
@@ -37,7 +37,7 @@ export default function KyleToggle({ active, onToggle, accentColor }: Props) {
           strokeLinejoin="round"
         />
       </svg>
-      Kyle
+      Focus Chat
     </button>
   );
 }

@@ -53,7 +53,7 @@ export default function ChatInput({ onSend, mode, onModeChange, isProcessing, ac
             : 'text-white/25 border-transparent bg-transparent hover:text-white/40'
         }`}
       >
-        Fast
+        Quick
       </button>
       <button
         onClick={() => onModeChange('deep')}
@@ -63,7 +63,7 @@ export default function ChatInput({ onSend, mode, onModeChange, isProcessing, ac
             : 'text-white/25 border-transparent bg-transparent hover:text-white/40'
         }`}
       >
-        Deep
+        Thorough
       </button>
     </div>
   );
@@ -81,10 +81,10 @@ export default function ChatInput({ onSend, mode, onModeChange, isProcessing, ac
               handleInput();
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Describe a scenario..."
+            placeholder="Try: Newcastle beat Spurs, Villa lose - what changes?"
             rows={3}
             disabled={isProcessing}
-            className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/20 transition-colors disabled:opacity-40"
+            className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white/80 placeholder-white/20 resize-none overflow-y-auto outline-none focus:border-white/20 transition-colors disabled:opacity-40"
             style={{ minHeight: '72px' }}
           />
           <div className="flex flex-col items-end gap-2 shrink-0">
@@ -121,10 +121,10 @@ export default function ChatInput({ onSend, mode, onModeChange, isProcessing, ac
                 handleInput();
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Describe a scenario..."
+              placeholder="Try: Newcastle beat Spurs, Villa lose."
               rows={1}
               disabled={isProcessing}
-              className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/20 transition-colors disabled:opacity-40"
+              className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white/80 placeholder-white/20 resize-none overflow-y-hidden outline-none focus:border-white/20 transition-colors disabled:opacity-40"
               style={{ minHeight: '38px' }}
             />
             <button

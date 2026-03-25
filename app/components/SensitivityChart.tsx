@@ -19,10 +19,26 @@ export default function SensitivityChart({
   teams,
   metricLabel,
 }: Props) {
-  const top10 = results.slice(0, 10);
+  const sorted = [...results].sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
+  const involvingSelected = sorted.filter(
+    (r) => r.homeTeam === selectedTeam || r.awayTeam === selectedTeam
+  );
+  const notInvolvingSelected = sorted.filter(
+    (r) => r.homeTeam !== selectedTeam && r.awayTeam !== selectedTeam
+  );
+
+  const preferredRows = [
+    ...involvingSelected.slice(0, 3),
+    ...notInvolvingSelected.slice(0, 2),
+  ];
+
+  // If there are not enough fixtures in one bucket, fill from remaining highest-impact rows.
+  const usedIds = new Set(preferredRows.map((r) => r.fixtureId));
+  const fallbackRows = sorted.filter((r) => !usedIds.has(r.fixtureId));
+  const displayRows = [...preferredRows, ...fallbackRows].slice(0, 5);
   const teamName = getTeamName(selectedTeam, teams);
 
-  if (top10.length === 0) {
+  if (displayRows.length === 0) {
     return (
       <div className="mb-8">
         <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
@@ -40,7 +56,7 @@ export default function SensitivityChart({
     );
   }
 
-  const maxDelta = Math.max(...top10.map((r) => r.maxAbsDelta), 1);
+  const maxDelta = Math.max(...displayRows.map((r) => r.maxAbsDelta), 1);
 
   return (
     <div className="mb-8">
@@ -48,11 +64,11 @@ export default function SensitivityChart({
         High-Leverage Fixtures
       </h2>
       <p className="text-xs text-white/30 mb-4">
-        Fixtures with the biggest impact on {teamName}&apos;s {metricLabel}. Green
-        = good for {teamName}, red = bad.
+        Top 3 fixtures involving {teamName}, plus top 2 outside fixtures, by max impact on{' '}
+        {teamName}&apos;s {metricLabel}. Green = good for {teamName}, red = bad.
       </p>
       <div className="space-y-2">
-        {top10.map((r) => {
+        {displayRows.map((r) => {
           const includesSelectedTeam =
             r.homeTeam === selectedTeam || r.awayTeam === selectedTeam;
           const deltas = [

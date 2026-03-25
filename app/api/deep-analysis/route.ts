@@ -899,6 +899,13 @@ export async function POST(req: NextRequest) {
         cached: Boolean(cached),
         cacheMatchType: cached?.cacheMatchType ?? null,
         cachedAt: cached?.generatedAt ?? null,
+        preview: cached
+          ? {
+              targetMetric: cached.analysis.targetMetric,
+              summary: cached.analysis.bottomLine?.summary ?? '',
+              keyScenario: cached.analysis.bottomLine?.keyScenario ?? '',
+            }
+          : null,
       });
     }
 

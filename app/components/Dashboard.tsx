@@ -57,6 +57,15 @@ interface DashboardProps {
   initialTeam?: string;
 }
 
+type DeepDivePreviewState = {
+  status: 'idle' | 'loading' | 'ready' | 'missing' | 'disabled' | 'error';
+  summary: string;
+  keyScenario: string;
+  cachedAt: number | null;
+  cacheMatchType: 'exact' | 'scenario_fallback' | null;
+  targetMetric: string | null;
+};
+
 export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const [teams, setTeams] = useState<Team[]>(HARDCODED_STANDINGS);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
@@ -84,6 +93,14 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   // Deep Analysis modal state
   const [deepAnalysisOpen, setDeepAnalysisOpen] = useState(false);
   const [showQuickStart, setShowQuickStart] = useState(false);
+  const [deepDivePreview, setDeepDivePreview] = useState<DeepDivePreviewState>({
+    status: 'idle',
+    summary: '',
+    keyScenario: '',
+    cachedAt: null,
+    cacheMatchType: null,
+    targetMetric: null,
+  });
 
   // Modified simulation results (with chapters applied)
   const [modifiedSimResults, setModifiedSimResults] = useState<SimulationResult[] | null>(null);
@@ -506,6 +523,13 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     runSimulation();
   }, [noteFirstInteraction, runSimulation]);
 
+  const deepDiveText = useMemo(() => {
+    const raw = deepDivePreview.keyScenario || deepDivePreview.summary || '';
+    if (!raw) return '';
+    if (raw.length <= 210) return raw;
+    return `${raw.slice(0, 210).trimEnd()}...`;
+  }, [deepDivePreview.keyScenario, deepDivePreview.summary]);
+
   useEffect(() => {
     try {
       const dismissed = window.localStorage.getItem('keepwatch.quickStartDismissed');
@@ -514,6 +538,82 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       setShowQuickStart(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!simResults || teams.length === 0 || allFixtures.length === 0) return;
+
+    const controller = new AbortController();
+    setDeepDivePreview((prev) => ({ ...prev, status: 'loading' }));
+
+    const fetchDeepDivePreview = async () => {
+      try {
+        const res = await fetch('/api/deep-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetTeam: selectedTeam,
+            targetMetric: sensitivityMetric,
+            teams,
+            fixtures: allFixtures,
+            checkCacheOnly: true,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to fetch deep dive preview');
+        }
+
+        const data = await res.json();
+        if (controller.signal.aborted) return;
+
+        if (data.cacheEnabled === false) {
+          setDeepDivePreview({
+            status: 'disabled',
+            summary: '',
+            keyScenario: '',
+            cachedAt: null,
+            cacheMatchType: null,
+            targetMetric: sensitivityMetric,
+          });
+          return;
+        }
+
+        if (!data.cached || !data.preview) {
+          setDeepDivePreview({
+            status: 'missing',
+            summary: '',
+            keyScenario: '',
+            cachedAt: null,
+            cacheMatchType: null,
+            targetMetric: sensitivityMetric,
+          });
+          return;
+        }
+
+        setDeepDivePreview({
+          status: 'ready',
+          summary: data.preview.summary ?? '',
+          keyScenario: data.preview.keyScenario ?? '',
+          cachedAt: typeof data.cachedAt === 'number' ? data.cachedAt : null,
+          cacheMatchType:
+            data.cacheMatchType === 'exact' || data.cacheMatchType === 'scenario_fallback'
+              ? data.cacheMatchType
+              : null,
+          targetMetric: typeof data.preview.targetMetric === 'string' ? data.preview.targetMetric : sensitivityMetric,
+        });
+      } catch {
+        if (controller.signal.aborted) return;
+        setDeepDivePreview((prev) => ({
+          ...prev,
+          status: 'error',
+        }));
+      }
+    };
+
+    fetchDeepDivePreview();
+    return () => controller.abort();
+  }, [simResults, selectedTeam, sensitivityMetric, teams, allFixtures]);
 
   return (
     <div
@@ -686,14 +786,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
             {/* Toolbar */}
             <div className="flex items-center gap-4 mb-7 flex-wrap">
-              <RefreshButton
-                onRefresh={handlePrimaryRun}
-                running={running}
-                hasResults={simResults !== null}
-                fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
-                simCount={SIM_COUNT}
-                tonedDown={showQuickStart}
-              />
               <div className="flex items-start gap-3 flex-wrap">
                 <div className="flex flex-col gap-1">
                   <div className="text-[10px] tracking-[0.12em] uppercase text-white/28 font-oswald px-1">
@@ -778,6 +870,47 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-lg border border-white/[0.08] bg-white/[0.015] px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="font-oswald text-[11px] tracking-[0.12em] uppercase text-white/68">
+                      Deep Dive Snapshot
+                    </div>
+                  </div>
+
+                  {deepDivePreview.status === 'loading' && (
+                    <div className="text-[12px] text-white/45">
+                      Checking cached deep dive summary...
+                    </div>
+                  )}
+
+                  {deepDivePreview.status === 'ready' && (
+                    <div className="text-[12px] text-white/67 leading-5">
+                      {deepDiveText}
+                    </div>
+                  )}
+
+                  {(deepDivePreview.status === 'missing' || deepDivePreview.status === 'disabled' || deepDivePreview.status === 'error') && (
+                    <div className="text-[12px] text-white/50 leading-5">
+                      {deepDivePreview.status === 'disabled'
+                        ? 'Detailed-report cache is not configured for this deployment yet.'
+                        : 'No deep dive yet for this scenario — run one now and we’ll show the key takeaway here.'}
+                    </div>
+                  )}
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDeepAnalysisOpen(true)}
+                  className="shrink-0 self-center px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
+                >
+                  {deepDivePreview.status === 'ready' ? 'View Report' : 'Generate Report'}
+                </button>
               </div>
             </div>
 
@@ -906,6 +1039,18 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 Standings as of March 21, 2026. European places assume standard
                 allocation (no cup winners adjustments).
               </div>
+            </div>
+
+            {/* Low-priority refresh action at page bottom */}
+            <div className="mb-2 pt-2 border-t border-white/[0.06]">
+              <RefreshButton
+                onRefresh={handlePrimaryRun}
+                running={running}
+                hasResults={simResults !== null}
+                fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
+                simCount={SIM_COUNT}
+                tonedDown
+              />
             </div>
           </div>
         </div>

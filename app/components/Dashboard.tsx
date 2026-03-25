@@ -523,13 +523,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     runSimulation();
   }, [noteFirstInteraction, runSimulation]);
 
-  const deepDiveText = useMemo(() => {
-    const raw = deepDivePreview.keyScenario || deepDivePreview.summary || '';
-    if (!raw) return '';
-    if (raw.length <= 210) return raw;
-    return `${raw.slice(0, 210).trimEnd()}...`;
-  }, [deepDivePreview.keyScenario, deepDivePreview.summary]);
-
   useEffect(() => {
     try {
       const dismissed = window.localStorage.getItem('keepwatch.quickStartDismissed');
@@ -890,7 +883,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
                   {deepDivePreview.status === 'ready' && (
                     <div className="text-[12px] text-white/67 leading-5">
-                      {deepDiveText}
+                      {deepDivePreview.keyScenario || deepDivePreview.summary}
                     </div>
                   )}
 

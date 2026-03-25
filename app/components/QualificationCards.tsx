@@ -7,6 +7,15 @@ interface Props {
   cards: CardConfig[];
 }
 
+function toOrdinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  if (n % 10 === 1) return `${n}st`;
+  if (n % 10 === 2) return `${n}nd`;
+  if (n % 10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
 function OddsBar({ value, color }: { value: number; color: string }) {
   return (
     <div className="h-2 rounded-sm bg-white/[0.08] overflow-hidden w-full">
@@ -19,6 +28,11 @@ function OddsBar({ value, color }: { value: number; color: string }) {
 }
 
 export default function QualificationCards({ result, cards }: Props) {
+  const mostLikelyFinish =
+    result.positionDistribution.length > 0
+      ? result.positionDistribution.indexOf(Math.max(...result.positionDistribution)) + 1
+      : null;
+
   return (
     <div className="mb-8">
       <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/70 mb-1">
@@ -65,7 +79,10 @@ export default function QualificationCards({ result, cards }: Props) {
           Expected points: <span className="text-white/80 font-semibold">{result.avgPoints.toFixed(1)}</span>
         </span>
         <span>
-          Expected finish: <span className="text-white/80 font-semibold">{result.avgPosition.toFixed(1)}</span>
+          Most likely finish:{' '}
+          <span className="text-white/80 font-semibold">
+            {mostLikelyFinish !== null ? toOrdinal(mostLikelyFinish) : '--'}
+          </span>
         </span>
       </div>
     </div>

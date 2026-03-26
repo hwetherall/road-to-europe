@@ -24,6 +24,7 @@ interface Props {
   selectedTeamResult: DeepAnalysisMetricResult | null;
   sensitivityResults: SensitivityResult[] | null;
   sensitivityMetric: SensitivityMetric;
+  onWhatIfTrigger?: (metric: string, label: string) => void;
 }
 
 type DeepAnalysisMetric = Exclude<SensitivityMetric, 'survivalPct'>;
@@ -71,6 +72,7 @@ export default function DeepAnalysisModal({
   selectedTeamResult,
   sensitivityResults,
   sensitivityMetric,
+  onWhatIfTrigger,
 }: Props) {
   const [phase, setPhase] = useState<'config' | 'loading' | 'ready' | 'error'>('config');
   const [fadeIn, setFadeIn] = useState(false);
@@ -105,6 +107,17 @@ export default function DeepAnalysisModal({
           )
         : allMetricOptions,
     [allMetricOptions, selectedTeamResult]
+  );
+  const impossibleMetrics = useMemo(
+    () =>
+      selectedTeamResult
+        ? allMetricOptions.filter((option) => selectedTeamResult[option.value] === 0)
+        : [],
+    [allMetricOptions, selectedTeamResult]
+  );
+  const isImpossibleMetricSelected = useMemo(
+    () => impossibleMetrics.some((m) => m.value === targetMetric),
+    [impossibleMetrics, targetMetric]
   );
   const metricOptionsWithPct = useMemo(
     () => {
@@ -149,10 +162,12 @@ export default function DeepAnalysisModal({
   useEffect(() => {
     if (!open || !hasMetricOptions) return;
     const hasSelectedMetric = metricOptions.some((option) => option.value === targetMetric);
-    if (!hasSelectedMetric) {
+    const isImpossible = impossibleMetrics.some((option) => option.value === targetMetric);
+    // Don't override if user selected an impossible metric (for What-If)
+    if (!hasSelectedMetric && !isImpossible) {
       setTargetMetric(metricOptions[0].value);
     }
-  }, [open, targetMetric, metricOptions, hasMetricOptions]);
+  }, [open, targetMetric, metricOptions, impossibleMetrics, hasMetricOptions]);
 
   const handleGenerate = useCallback(async (forceRefresh = false) => {
     setError('');
@@ -333,21 +348,83 @@ export default function DeepAnalysisModal({
                   team&apos;s major outcomes are currently locked at 0% or 100%.
                 </div>
               )}
+
+              {/* Impossible metrics — What If trigger */}
+              {impossibleMetrics.length > 0 && onWhatIfTrigger && (
+                <div className="mt-4">
+                  <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">
+                    Impossible outcomes &mdash; &ldquo;What If&rdquo;
+                  </div>
+                  <div className="space-y-1.5">
+                    {impossibleMetrics.map((opt) => {
+                      const isSelected = targetMetric === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          onClick={() => setTargetMetric(opt.value)}
+                          className="w-full text-left px-3 py-2 rounded-lg transition-all cursor-pointer"
+                          style={{
+                            background: isSelected ? `${accentColor}14` : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${isSelected ? `${accentColor}40` : 'rgba(255,255,255,0.06)'}`,
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm" style={{ color: isSelected ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.7)' }}>
+                              {opt.label}
+                            </span>
+                            <span className="text-[11px]" style={{ color: isSelected ? accentColor : 'rgba(255,255,255,0.35)' }}>0%</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <button
-              onClick={() => handleGenerate()}
-              disabled={!hasMetricOptions}
-              className="w-full py-3 rounded-lg font-oswald text-sm font-bold tracking-widest uppercase transition-all cursor-pointer"
-              style={{
-                background: `linear-gradient(135deg, ${accentColor}40, ${accentColor}20)`,
-                border: `1px solid ${accentColor}50`,
-                color: textAccentColor,
-                opacity: hasMetricOptions ? 1 : 0.45,
-              }}
-            >
-              Generate Analysis
-            </button>
+            {/* Show What-If trigger when impossible metric selected */}
+            {isImpossibleMetricSelected && onWhatIfTrigger ? (
+              <div
+                className="w-full p-4 rounded-lg text-center"
+                style={{
+                  background: `linear-gradient(135deg, ${accentColor}12, ${accentColor}06)`,
+                  border: `1px solid ${accentColor}30`,
+                }}
+              >
+                <div className="text-[11px] text-white/50 mb-3">
+                  This outcome is currently at 0%. Deep analysis isn&apos;t available, but you can explore
+                  what structural changes could make it possible.
+                </div>
+                <button
+                  onClick={() => {
+                    const label = getTargetMetricLabel(targetMetric);
+                    onWhatIfTrigger(targetMetric, label);
+                  }}
+                  className="px-6 py-2.5 rounded-lg font-oswald text-sm font-bold tracking-widest uppercase transition-all hover:brightness-110 cursor-pointer"
+                  style={{
+                    background: `linear-gradient(135deg, ${accentColor}50, ${accentColor}30)`,
+                    border: `1px solid ${accentColor}40`,
+                    color: textAccentColor,
+                  }}
+                >
+                  Explore &ldquo;What If&rdquo;
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleGenerate()}
+                disabled={!hasMetricOptions || isImpossibleMetricSelected}
+                className="w-full py-3 rounded-lg font-oswald text-sm font-bold tracking-widest uppercase transition-all cursor-pointer"
+                style={{
+                  background: `linear-gradient(135deg, ${accentColor}40, ${accentColor}20)`,
+                  border: `1px solid ${accentColor}50`,
+                  color: textAccentColor,
+                  opacity: hasMetricOptions && !isImpossibleMetricSelected ? 1 : 0.45,
+                }}
+              >
+                Generate Analysis
+              </button>
+            )}
           </div>
 
           <button

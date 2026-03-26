@@ -42,3 +42,6 @@ next-env.d.ts
 
 # office temp files
 ~$*
+
+# FIFA/FC dataset (large CSV, download from Kaggle)
+/data/*.csv

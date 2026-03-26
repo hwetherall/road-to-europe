@@ -12,7 +12,13 @@
       "Bash(npx next:*)",
       "Bash(npm run:*)",
       "WebFetch(domain:the-odds-api.com)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git -C /c/Users/hweth/OneDrive/Desktop/Personal Projects/road-to-europe log --oneline)",
+      "Bash(grep -r \"export\" /c/Users/hweth/OneDrive/Desktop/Personal Projects/road-to-europe/lib/*.ts)",
+      "Bash(python3 -c \":*)",
+      "Bash(node -e \":*)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__execute_sql"
     ]
   }
 }

@@ -16,35 +16,18 @@ import {
   CandidatePath,
 } from '@/lib/types';
 import { executeWebSearch } from '@/lib/web-search';
+import {
+  callOpenRouter,
+  OpenRouterMessage,
+  OpenRouterError,
+  OpenRouterTool,
+} from '@/lib/openrouter';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-// ── OpenRouter Call ──
-
-interface OpenRouterMessage {
-  role: string;
-  content?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: string;
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-}
-
-class OpenRouterError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = 'OpenRouterError';
-    this.status = status;
-  }
-}
-
-const TOOLS = [
+const TOOLS: OpenRouterTool[] = [
   {
-    type: 'function' as const,
+    type: 'function',
     function: {
       name: 'web_search',
       description:
@@ -62,62 +45,6 @@ const TOOLS = [
     },
   },
 ];
-
-async function callOpenRouter(
-  messages: OpenRouterMessage[],
-  tools?: typeof TOOLS,
-  maxTokens: number = 4000
-): Promise<OpenRouterMessage> {
-  const body: Record<string, unknown> = {
-    model: 'anthropic/claude-opus-4.6',
-    messages,
-    max_tokens: maxTokens,
-  };
-  if (tools && tools.length > 0) body.tools = tools;
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let providerMessage = '';
-
-    try {
-      const parsed = JSON.parse(errorText);
-      providerMessage =
-        parsed?.error?.message ??
-        parsed?.message ??
-        parsed?.error ??
-        '';
-    } catch {
-      providerMessage = errorText;
-    }
-
-    const trimmedMessage = typeof providerMessage === 'string' ? providerMessage.trim() : '';
-    console.error('OpenRouter error:', trimmedMessage || errorText);
-
-    if (response.status === 402) {
-      throw new OpenRouterError(
-        402,
-        'OpenRouter credits/billing issue (HTTP 402). Add credits or switch to a cheaper model in OpenRouter.'
-      );
-    }
-
-    throw new OpenRouterError(
-      response.status,
-      trimmedMessage || `OpenRouter API error: ${response.status}`
-    );
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message ?? { role: 'assistant', content: '' };
-}
 
 // ── Narrative Agent ──
 
@@ -487,7 +414,7 @@ async function runResearchPhase(
   const MAX_ROUNDS = depth === 'deep' ? 18 : 10;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const message = await callOpenRouter(conversation, TOOLS);
+    const message = await callOpenRouter(conversation, { tools: TOOLS });
 
     if (!message.tool_calls || message.tool_calls.length === 0) {
       // Research complete — extract the fact sheet
@@ -537,7 +464,7 @@ async function runResearchPhase(
     role: 'user',
     content: 'Please output the fact sheet now with everything you have verified so far.',
   });
-  const finalMsg = await callOpenRouter(conversation, []);
+  const finalMsg = await callOpenRouter(conversation);
   const content = finalMsg.content ?? '';
   const factMatch = content.match(/```factsheet\s*([\s\S]*?)```/);
   return { factSheet: factMatch ? factMatch[1].trim() : content, sources, searchCount };
@@ -710,7 +637,7 @@ async function runWritingPhase(
     { role: 'user', content: `Write the Deep Analysis JSON for ${teamName}. Use ONLY facts from the fact sheet. Do not invent any names or claims.` },
   ];
 
-  const message = await callOpenRouter(conversation, [], 8000);
+  const message = await callOpenRouter(conversation, { maxTokens: 8000 });
   const content = message.content ?? '';
 
   // Parse JSON
@@ -769,7 +696,7 @@ async function runWritingPhase(
       content: `Your analysis contains factual errors that contradict the league standings. Fix ONLY these specific errors and return the complete corrected JSON. Do not change anything else.\n\n${correctionList}\n\nReturn the corrected full JSON wrapped in \`\`\`json blocks.`,
     });
 
-    const correctedMessage = await callOpenRouter(conversation, [], 8000);
+    const correctedMessage = await callOpenRouter(conversation, { maxTokens: 8000 });
     const correctedContent = correctedMessage.content ?? '';
 
     const correctedMatch = correctedContent.match(/```json\s*([\s\S]*?)\s*```/);

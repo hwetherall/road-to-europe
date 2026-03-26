@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { executeWebSearch } from '@/lib/web-search';
+import {
+  callOpenRouter,
+  OpenRouterMessage,
+  OpenRouterTool,
+} from '@/lib/openrouter';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // ── Tool Definitions ──
 
-const TOOLS = [
+const TOOLS: OpenRouterTool[] = [
   {
-    type: 'function' as const,
+    type: 'function',
     function: {
       name: 'web_search',
       description:
@@ -502,54 +507,6 @@ function parseAgentResponse(
 
 // ── OpenRouter Call ──
 
-interface OpenRouterMessage {
-  role: string;
-  content?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: string;
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-}
-
-async function callOpenRouter(
-  model: string,
-  messages: OpenRouterMessage[],
-  tools?: typeof TOOLS
-): Promise<{
-  message: OpenRouterMessage;
-  error?: string;
-}> {
-  const body: Record<string, unknown> = {
-    model,
-    messages,
-    max_tokens: 1500,
-  };
-
-  if (tools && tools.length > 0) {
-    body.tools = tools;
-  }
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('OpenRouter error:', error);
-    return { message: { role: 'assistant', content: '' }, error };
-  }
-
-  const data = await response.json();
-  return { message: data.choices?.[0]?.message ?? { role: 'assistant', content: '' } };
-}
-
 // ── Main Handler ──
 
 export async function POST(req: NextRequest) {
@@ -589,9 +546,10 @@ export async function POST(req: NextRequest) {
 
     // Tool-use loop
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const { message, error } = await callOpenRouter(model, conversation, TOOLS);
-
-      if (error) {
+      let message: OpenRouterMessage;
+      try {
+        message = await callOpenRouter(conversation, { model, tools: TOOLS, maxTokens: 1500 });
+      } catch {
         return NextResponse.json(
           { content: 'Failed to get a response from the AI. Please try again.', toolCalls: toolCallLog },
           { status: 502 }
@@ -648,7 +606,7 @@ export async function POST(req: NextRequest) {
       content: 'Please provide your best estimate based on the research so far.',
     });
 
-    const { message: finalMessage } = await callOpenRouter(model, conversation, []);
+    const finalMessage = await callOpenRouter(conversation, { model, maxTokens: 1500 });
     const parsed = parseAgentResponse(finalMessage.content ?? '', toolCallLog);
     return NextResponse.json(parsed);
   } catch (error) {

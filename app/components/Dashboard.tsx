@@ -40,6 +40,7 @@ import RefreshButton from './RefreshButton';
 import KyleToggle from './KyleToggle';
 import KyleMiniDashboard from './KyleMiniDashboard';
 import DeepAnalysisModal from './DeepAnalysisModal';
+import WhatIfAnalysis from './WhatIfAnalysis';
 
 const SIM_COUNT = 10000;
 const SENSITIVITY_SIMS = 1000;
@@ -92,6 +93,10 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // Deep Analysis modal state
   const [deepAnalysisOpen, setDeepAnalysisOpen] = useState(false);
+
+  // What-If Analysis modal state
+  const [whatIfOpen, setWhatIfOpen] = useState(false);
+  const [whatIfTarget, setWhatIfTarget] = useState<{ metric: keyof SimulationResult; label: string } | null>(null);
   const [showQuickStart, setShowQuickStart] = useState(false);
   const [deepDivePreview, setDeepDivePreview] = useState<DeepDivePreviewState>({
     status: 'idle',
@@ -1080,7 +1085,30 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         selectedTeamResult={baselineTeamResult}
         sensitivityResults={sensitivityResults}
         sensitivityMetric={sensitivityMetric}
+        onWhatIfTrigger={(metric, label) => {
+          setDeepAnalysisOpen(false);
+          setWhatIfTarget({ metric: metric as keyof SimulationResult, label });
+          setWhatIfOpen(true);
+        }}
       />
+
+      {/* What-If Analysis Modal */}
+      {whatIfTarget && (
+        <WhatIfAnalysis
+          open={whatIfOpen}
+          onClose={() => {
+            setWhatIfOpen(false);
+            setWhatIfTarget(null);
+          }}
+          accentColor={accentColor}
+          textAccentColor={textColor}
+          targetTeam={selectedTeam}
+          targetMetric={whatIfTarget.metric}
+          targetMetricLabel={whatIfTarget.label}
+          teams={teams}
+          fixtures={allFixtures}
+        />
+      )}
     </div>
   );
 }

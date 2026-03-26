@@ -1,90 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Keepwatch — EPL Season Simulator
+
+Keepwatch is a Monte Carlo simulation tool that calculates the probability of any Premier League team qualifying for European competition, getting relegated, or winning the title. It runs 10,000 season simulations using real bookmaker odds and Elo-derived probabilities, then identifies the specific fixtures — out of ~80 remaining — that have the highest leverage on your team's odds.
+
+Beyond the numbers, Keepwatch features an AI-powered scenario chat where you can ask "what if Bruno Guimarães is injured for 6 weeks?" and get a quantified probability modification applied to the simulation in real time. A Deep Analysis mode runs targeted web research on the teams involved in high-leverage fixtures and produces a long-form tactical report.
+
+Built with Next.js 14 (App Router), Tailwind CSS, and TypeScript. Simulation runs client-side. AI features powered by OpenRouter (Claude). Live data from football-data.org and the-odds-api.com. Deployed on Vercel.
+
+## Features
+
+- **Monte Carlo simulation** — 10,000 season outcomes with Poisson-distributed goal sampling
+- **Sensitivity analysis** — identifies which fixtures move your team's odds the most
+- **What-If mode** — lock any fixture result and see the impact in real time
+- **AI scenario chat** — describe scenarios in natural language, get quantified probability modifications
+- **Deep Analysis** — AI-researched tactical reports on high-leverage fixtures
+- **Any team** — works for all 20 Premier League clubs, auto-adapts cards and metrics to context (title race, European push, relegation battle)
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
+cp .env.example .env.local  # Add your API keys
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Required Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Source | Purpose |
+|---|---|---|
+| `FOOTBALL_DATA_API_KEY` | [football-data.org](https://www.football-data.org/client/register) | Live standings and fixtures |
+| `ODDS_API_KEY` | [the-odds-api.com](https://the-odds-api.com) | Bookmaker match probabilities |
+| `OPENROUTER_API_KEY` | [openrouter.ai](https://openrouter.ai) | AI chat and deep analysis |
+| `SERPER_API_KEY` | [serper.dev](https://serper.dev) | Web search for AI research |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The app works without any API keys — it falls back to hardcoded standings and Elo-estimated probabilities. AI features require `OPENROUTER_API_KEY`.
 
-## Learn More
+## Tech Stack
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-## Deep Analysis Shared Cache (Supabase)
-
-Deep Analysis reports can be reused across users/devices when the same scenario is requested.
-The cache key includes:
-
-- target team
-- target metric + threshold
-- normalized standings + fixtures + probabilities snapshot
-
-If data has not changed, the API returns the saved report immediately. Users can still click
-`Regenerate Fresh` to force a new report and overwrite the cached version.
-
-### 1) Add environment variables
-
-Set these in your deployment (and local `.env` if needed):
-
-```env
-SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
-```
-
-`SUPABASE_SERVICE_ROLE_KEY` must stay server-side only. Never expose it in client code.
-
-### 2) Create cache table
-
-Run the SQL migration in:
-
-`supabase/migrations/20260323_deep_analysis_reports.sql`
-
-This creates `public.deep_analysis_reports` and indexes needed for scenario lookup/upsert.
-
-### 3) Behavior
-
-- Cache hit: returns saved report (`cacheStatus: hit`) in seconds.
-- Cache miss: generates report, stores it, returns (`cacheStatus: miss`).
-- Force refresh: generates fresh report and updates saved record (`cacheStatus: refreshed`).
-
-### 4) Retention cleanup
-
-Run:
-
-`supabase/migrations/20260323_deep_analysis_retention.sql`
-
-This adds:
-
-- `public.prune_old_deep_analysis_reports(retention_days integer default 30)`
-- A daily cleanup job at `03:15` (when `pg_cron` is available), pruning rows older than 30 days.
-
-If your project cannot create scheduled jobs automatically, you can still call the function manually:
-
-```sql
-select public.prune_old_deep_analysis_reports(30);
-```
+- **Frontend:** Next.js 14 (App Router) + Tailwind CSS v4
+- **Simulation:** Client-side Monte Carlo engine (TypeScript)
+- **Data:** football-data.org (standings + fixtures) + the-odds-api.com (match probabilities)
+- **AI:** OpenRouter (scenario chat + deep analysis)
+- **Search:** Serper (primary) + Tavily (fallback)
+- **Cache:** Supabase (deep analysis report caching)
+- **Hosting:** Vercel

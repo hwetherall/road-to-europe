@@ -68,9 +68,6 @@ function ModificationCard({
           >
             Apply
           </button>
-          <button className="px-3 py-1.5 rounded text-[11px] text-white/40 border border-white/10 hover:border-white/20 bg-transparent transition-colors cursor-pointer">
-            Adjust
-          </button>
         </div>
       )}
     </div>

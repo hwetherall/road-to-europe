@@ -232,7 +232,7 @@ Or for a fixture lock:
 }
 \`\`\`
 
-Team abbreviations: ARS, AVL, BOU, BRE, BHA, BUR, CHE, CRY, EVE, FUL, LIV, LUT, MCI, MUN, NEW, NFO, TOT, WHU, WOL, IPS
+Team abbreviations: ARS, MCI, MUN, AVL, CFC, LFC, BRE, FUL, EVE, BRI, NEW, BOU, SUN, CRY, LEE, TOT, NFO, WHU, BUR, WOL
 
 CRITICAL: You MUST ALWAYS include the JSON block in EVERY response where you discuss a scenario's impact — even when you have caveats, warnings, or questions. The user needs the [Apply] button to appear. Include the JSON block FIRST, then add your caveats and questions AFTER it. Never describe numbers in prose without also outputting the structured JSON. If you're unsure about the magnitude, pick your best estimate and note the uncertainty — the user can always adjust.
 

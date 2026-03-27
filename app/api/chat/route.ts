@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { executeWebSearch } from '@/lib/web-search';
+import { lookupPlayer, getPlayersForClub } from '@/lib/what-if/fifa-data';
 import {
   callOpenRouter,
   OpenRouterMessage,
@@ -43,6 +44,42 @@ const TOOLS: OpenRouterTool[] = [
           },
         },
         required: ['query', 'intent'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'lookup_player',
+      description:
+        "Look up a player's FC 26 quality ratings from our local database. Use this to compare players numerically — e.g. to quantify the quality drop from a first-choice player to their backup. Returns overall rating, potential, age, positions, and attribute breakdown (pace, shooting, passing, dribbling, defending, physical). Faster and more reliable than web search for player quality comparisons.",
+      parameters: {
+        type: 'object',
+        properties: {
+          playerName: {
+            type: 'string',
+            description: 'Player name to search for (supports fuzzy matching, e.g. "Areola", "Bowen")',
+          },
+        },
+        required: ['playerName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_squad',
+      description:
+        "Get the full squad for a Premier League team with FC 26 quality ratings. Use this to see the full depth chart, compare starters vs backups, and identify quality drops at specific positions. Returns all players sorted by overall rating.",
+      parameters: {
+        type: 'object',
+        properties: {
+          team: {
+            type: 'string',
+            description: 'Team name or 3-letter abbreviation (e.g. "WHU", "West Ham", "TOT", "Arsenal")',
+          },
+        },
+        required: ['team'],
       },
     },
   },
@@ -116,7 +153,7 @@ function buildSystemPrompt(mode: 'fast' | 'deep', ctx: AgentContext): string {
   const modeInstructions =
     mode === 'fast'
       ? `
-FAST MODE: You have a budget of 1-2 web searches. Use them to verify the most critical facts (e.g., does the player still play for the claimed team? what is their current status?). Then reason from verified facts to produce your estimate. Be upfront about the limitations of a fast estimate.`
+FAST MODE: You have a budget of 1-2 web searches PLUS unlimited lookup_player/get_squad calls (they are instant local lookups). Use web searches to verify critical facts (injuries, current status). Use player/squad lookups to quantify quality differences. Then reason from verified facts to produce your estimate.`
       : `
 DEEP MODE: You have a budget of up to 8 web searches. Follow this workflow:
 1. PLAN: Before searching, tell the user your research plan (what you need to find and why). Ask them to confirm before proceeding.
@@ -141,6 +178,13 @@ Your training data about football is UNRELIABLE. Players transfer between clubs.
 
 NEVER state a football fact without first searching to confirm it is current. If you cannot verify something, say so explicitly.
 
+## PLAYER QUALITY DATA
+You have access to FC 26 player quality ratings via two local tools:
+- **lookup_player**: Look up any player by name to get their overall rating, potential, age, positions, and attribute breakdown (pace/shooting/passing/dribbling/defending/physical). Use this to quantify the quality drop when a player is replaced — e.g. "Areola (OVR 79) → Herrick (OVR 54) = 25-point drop".
+- **get_squad**: Get the full squad for any PL team. Use this to see depth at each position and identify who the actual backup would be.
+
+PREFER these tools over web search for player quality comparisons. They are faster, more reliable, and give you concrete numbers to base your probability deltas on. Use web search for current form, injuries, and real-world context that FC 26 ratings don't capture.
+
 ## CURRENT CONTEXT
 Selected team: ${ctx.selectedTeam} (${ctx.selectedTeamName})
 Current position: ${ctx.position}
@@ -163,7 +207,11 @@ When you receive a scenario, first classify it:
 
 **Player injury/absence**: Search for the player's current club and role, their statistical contribution, the team's record with/without them, and likely replacement. Quantify as team-wide probability deltas.
 
-**Fixture lock request**: ("Chelsea lose to Arsenal") This is a direct fixture override, not a probability modifier. Output it as a fixture_lock type, not a probability_modifier. No research needed unless the user wants analysis of knock-on effects.
+**Fixture lock request**: ("Chelsea lose to Arsenal") This is a direct fixture override for a SINGLE match, not a probability modifier. Output it as a fixture_lock type, not a probability_modifier. No research needed unless the user wants analysis of knock-on effects.
+
+**Team result lock**: ("Tottenham lose all their games", "Man City win every remaining match") This locks ALL remaining fixtures for that team to a specific result. Use the compound type with teamFixtureLocks. The simulation will set each fixture to 100% for the specified outcome.
+
+**Compound scenario**: ("If Saka is injured AND Arsenal lose their next 3") When a scenario combines BOTH fixed match outcomes AND probability adjustments, use the compound type. This applies fixture locks FIRST (100% certainty outcomes), then applies probability modifiers to the remaining non-locked fixtures.
 
 **Team circumstance change**: (fixture congestion, cup exit, managerial change) Search for current team context, upcoming schedule, and historical parallels. Quantify as team-wide probability deltas.
 
@@ -202,6 +250,7 @@ When a team's win probability drops, the lost probability distributes to draws a
 ## OUTPUT FORMAT
 When you have a proposed modification, include this structured block in your response:
 
+**For probability adjustments only** (injuries, form changes, etc.):
 \`\`\`json
 {
   "type": "scenario_modification",
@@ -223,8 +272,7 @@ When you have a proposed modification, include this structured block in your res
 }
 \`\`\`
 
-Or for a fixture lock:
-
+**For a single fixture lock** (specific match result):
 \`\`\`json
 {
   "type": "fixture_lock",
@@ -236,6 +284,34 @@ Or for a fixture lock:
   "reasoning": "User requested this specific outcome"
 }
 \`\`\`
+
+**For team-level result locks and compound scenarios** ("Team X loses/wins/draws all remaining", or combining locks with probability adjustments):
+\`\`\`json
+{
+  "type": "compound",
+  "title": "Brief title",
+  "teamFixtureLocks": [
+    { "team": "TOT", "result": "lose" }
+  ],
+  "modification": {
+    "description": "Optional: additional probability adjustments for other teams",
+    "teamModifications": [
+      {
+        "team": "WHU",
+        "homeWinDelta": 0.03,
+        "awayWinDelta": 0.05,
+        "drawDelta": -0.02
+      }
+    ]
+  },
+  "confidence": "medium",
+  "reasoning": "Explanation of the compound scenario"
+}
+\`\`\`
+
+The compound type is powerful — use it whenever the user asks about a team winning/losing all their games, or combines fixed outcomes with probability adjustments. The "teamFixtureLocks" array locks ALL remaining fixtures for that team. Valid results are "win", "lose", or "draw" (relative to the named team). The optional "modification" field adjusts probabilities for OTHER teams' non-locked fixtures.
+
+IMPORTANT: When a user says "[Team] loses all their games" or "[Team] wins every remaining match", this is NOT a probability modifier. Use compound with teamFixtureLocks to lock those outcomes to 100%, then run the 10k simulation. Probability modifiers are for uncertain adjustments like injuries or form changes.
 
 Team abbreviations: ARS, MCI, MUN, AVL, CFC, LFC, BRE, FUL, EVE, BRI, NEW, BOU, SUN, CRY, LEE, TOT, NFO, WHU, BUR, WOL
 
@@ -298,15 +374,17 @@ interface ParsedOption {
     }>;
   };
   fixtureLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+  teamFixtureLocks?: Array<{ team: string; result: 'win' | 'lose' | 'draw' }>;
   confidence?: 'high' | 'medium' | 'low';
   reasoning?: string;
-  type: 'scenario_modification' | 'fixture_lock';
+  type: 'scenario_modification' | 'fixture_lock' | 'compound';
 }
 
 interface ParsedResponse {
   content: string;
   proposedModification?: ParsedOption['modification'];
   proposedLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+  proposedTeamLocks?: Array<{ team: string; result: 'win' | 'lose' | 'draw' }>;
   proposedOptions?: ParsedOption[];
   title?: string;
   confidence?: 'high' | 'medium' | 'low';
@@ -318,11 +396,14 @@ function parseJsonLenient(raw: string): Record<string, unknown> | null {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    // Tolerate common model formatting mistakes.
+    // Tolerate common model formatting mistakes
+    const DQ = String.fromCharCode(34); // straight double quote
+    const SQ = String.fromCharCode(39); // straight single quote
     const sanitized = raw
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\u201C\u201D]/g, DQ)
+      .replace(/[\u2018\u2019]/g, SQ)
+      .replace(/,\s*([}\]])/g, `$1`)
+      .replace(/:\s*\+(\d)/g, `: $1`)
       .trim();
     try {
       return JSON.parse(sanitized) as Record<string, unknown>;
@@ -420,7 +501,16 @@ function parseAgentResponse(
     // Parse each block into an option
     const options: ParsedOption[] = [];
     for (const parsed of jsonBlocks) {
-      if (parsed.type === 'scenario_modification' && parsed.modification) {
+      if (parsed.type === 'compound' && (parsed.teamFixtureLocks || parsed.modification)) {
+        options.push({
+          title: (parsed.title as string) ?? 'Compound scenario',
+          teamFixtureLocks: parsed.teamFixtureLocks as ParsedOption['teamFixtureLocks'],
+          modification: parsed.modification as ParsedOption['modification'],
+          confidence: parsed.confidence as ParsedOption['confidence'],
+          reasoning: parsed.reasoning as string | undefined,
+          type: 'compound',
+        });
+      } else if (parsed.type === 'scenario_modification' && parsed.modification) {
         options.push({
           title: (parsed.title as string) ?? (parsed.modification as { description?: string })?.description ?? 'Scenario modification',
           modification: parsed.modification as ParsedOption['modification'],
@@ -442,7 +532,10 @@ function parseAgentResponse(
     if (options.length === 1) {
       // Single option — use the flat fields for backwards compat
       const opt = options[0];
-      if (opt.type === 'fixture_lock') {
+      if (opt.type === 'compound') {
+        // Compound scenarios always go through proposedOptions for clear UI
+        result.proposedOptions = [opt];
+      } else if (opt.type === 'fixture_lock') {
         result.proposedLock = opt.fixtureLock;
       } else if (opt.modification && shouldExpandToAmbiguityOptions(content)) {
         // If the assistant mentions ambiguity/caveats but only provided one block,
@@ -510,110 +603,251 @@ function parseAgentResponse(
 // ── Main Handler ──
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { messages, mode, context } = body;
+  const encoder = new TextEncoder();
 
-    if (!OPENROUTER_API_KEY) {
-      return NextResponse.json({
-        content:
-          'Chat API is not configured. Add OPENROUTER_API_KEY to your .env.local to enable AI chat. For now, you can use the What-If panel to manually lock fixtures.',
-        toolCalls: [],
-      });
-    }
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (payload: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      };
 
-    // Build rich context
-    const agentCtx = buildAgentContext(context ?? {});
-    const deepAnalysisContext = context?.deepAnalysisContext as string | undefined;
-    const systemPrompt = deepAnalysisContext
-      ? deepAnalysisContext
-      : buildSystemPrompt(mode ?? 'fast', agentCtx);
-
-    // Choose model based on mode
-    const model = mode === 'deep' ? 'anthropic/claude-opus-4.6' : 'anthropic/claude-opus-4.6-mini';
-
-    const MAX_TOOL_ROUNDS = mode === 'deep' ? 8 : 2;
-    const toolCallLog: Array<{ id: string; query: string; status: 'complete' | 'error' }> = [];
-
-    // Build conversation with system prompt
-    const conversation: OpenRouterMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages.map((m: { role: string; content: string }) => ({
-        role: m.role,
-        content: m.content,
-      })),
-    ];
-
-    // Tool-use loop
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      let message: OpenRouterMessage;
-      try {
-        message = await callOpenRouter(conversation, { model, tools: TOOLS, maxTokens: 1500 });
-      } catch {
-        return NextResponse.json(
-          { content: 'Failed to get a response from the AI. Please try again.', toolCalls: toolCallLog },
-          { status: 502 }
-        );
-      }
-
-      const toolCalls = message.tool_calls;
-
-      if (!toolCalls || toolCalls.length === 0) {
-        // Agent is done — parse and return final response
-        const parsed = parseAgentResponse(message.content ?? '', toolCallLog);
-        return NextResponse.json(parsed);
-      }
-
-      // Execute tool calls
-      // Add the assistant message with tool calls to conversation
-      conversation.push(message);
-
-      for (const call of toolCalls) {
-        if (call.function.name === 'web_search') {
-          let args: { query: string; intent?: string };
-          try {
-            args = JSON.parse(call.function.arguments);
-          } catch {
-            args = { query: call.function.arguments, intent: 'general' };
-          }
-
-          const logEntry: { id: string; query: string; status: 'complete' | 'error' } = { id: call.id, query: args.query, status: 'complete' };
-
-          try {
-            const searchResults = await executeWebSearch(args.query);
-            conversation.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: `Search intent: ${args.intent ?? 'general'}\n${searchResults}`,
-            });
-          } catch (e) {
-            logEntry.status = 'error';
-            conversation.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: `Search failed: ${e instanceof Error ? e.message : 'Unknown error'}. Please proceed with available information.`,
-            });
-          }
-
-          toolCallLog.push(logEntry);
+      const closeSafe = () => {
+        try {
+          controller.close();
+        } catch {
+          // Already closed/cancelled.
         }
-      }
-    }
+      };
 
-    // Max rounds reached — force a conclusion
-    conversation.push({
-      role: 'user',
-      content: 'Please provide your best estimate based on the research so far.',
-    });
+      void (async () => {
+        try {
+          const body = await req.json();
+          const { messages, mode, context } = body;
 
-    const finalMessage = await callOpenRouter(conversation, { model, maxTokens: 1500 });
-    const parsed = parseAgentResponse(finalMessage.content ?? '', toolCallLog);
-    return NextResponse.json(parsed);
-  } catch (error) {
-    console.error('Chat API error:', error);
-    return NextResponse.json(
-      { content: 'An error occurred. Please try again.', toolCalls: [] },
-      { status: 500 }
-    );
-  }
+          if (!OPENROUTER_API_KEY) {
+            send({
+              type: 'final',
+              data: {
+                content:
+                  'Chat API is not configured. Add OPENROUTER_API_KEY to your .env.local to enable AI chat. For now, you can use the What-If panel to manually lock fixtures.',
+                toolCalls: [],
+              },
+            });
+            closeSafe();
+            return;
+          }
+
+          send({ type: 'status', message: 'Building scenario context...' });
+
+          const agentCtx = buildAgentContext(context ?? {});
+          const deepAnalysisContext = context?.deepAnalysisContext as string | undefined;
+          const systemPrompt = deepAnalysisContext
+            ? deepAnalysisContext
+            : buildSystemPrompt(mode ?? 'fast', agentCtx);
+
+          const model = mode === 'deep' ? 'anthropic/claude-opus-4.6' : 'x-ai/grok-4.1-fast';
+          const MAX_TOOL_ROUNDS = mode === 'deep' ? 8 : 2;
+          const toolCallLog: Array<{ id: string; query: string; status: 'complete' | 'error' }> = [];
+
+          const conversation: OpenRouterMessage[] = [
+            { role: 'system', content: systemPrompt },
+            ...(messages as Array<{ role: string; content: string }>).map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+          ];
+
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            send({ type: 'status', message: `Research round ${round + 1}...` });
+
+            let message: OpenRouterMessage;
+            try {
+              message = await callOpenRouter(conversation, { model, tools: TOOLS, maxTokens: 1500 });
+            } catch {
+              send({
+                type: 'error',
+                message: 'Failed to get a response from the AI. Please try again.',
+              });
+              send({
+                type: 'final',
+                data: { content: 'Failed to get a response from the AI. Please try again.', toolCalls: toolCallLog },
+              });
+              closeSafe();
+              return;
+            }
+
+            const toolCalls = message.tool_calls;
+
+            if (!toolCalls || toolCalls.length === 0) {
+              const parsed = parseAgentResponse(message.content ?? '', toolCallLog);
+              send({ type: 'status', message: 'Finalizing response...' });
+              send({ type: 'final', data: parsed as unknown as Record<string, unknown> });
+              closeSafe();
+              return;
+            }
+
+            conversation.push(message);
+
+            for (const call of toolCalls) {
+              let args: Record<string, unknown>;
+              try {
+                args = JSON.parse(call.function.arguments);
+              } catch {
+                args = { query: call.function.arguments };
+              }
+
+              if (call.function.name === 'web_search') {
+                const query = args.query as string;
+                const intent = (args.intent as string) ?? 'general';
+                const logEntry: { id: string; query: string; status: 'complete' | 'error' } = { id: call.id, query, status: 'complete' };
+                send({ type: 'tool_call', toolCall: { id: call.id, type: 'web_search', query, status: 'pending' } });
+
+                try {
+                  const searchResults = await executeWebSearch(query);
+                  conversation.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    content: `Search intent: ${intent}\n${searchResults}`,
+                  });
+                } catch (e) {
+                  logEntry.status = 'error';
+                  conversation.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    content: `Search failed: ${e instanceof Error ? e.message : 'Unknown error'}. Please proceed with available information.`,
+                  });
+                }
+
+                toolCallLog.push(logEntry);
+                send({
+                  type: 'tool_call',
+                  toolCall: { id: call.id, type: 'web_search', query, status: logEntry.status },
+                });
+              } else if (call.function.name === 'lookup_player') {
+                const name = args.playerName as string;
+                const query = `Player: ${name}`;
+                const logEntry: { id: string; query: string; status: 'complete' | 'error' } = { id: call.id, query, status: 'complete' };
+                send({ type: 'tool_call', toolCall: { id: call.id, type: 'web_search', query, status: 'pending' } });
+
+                try {
+                  const players = await lookupPlayer(name, true);
+                  if (players.length === 0) {
+                    conversation.push({
+                      role: 'tool',
+                      tool_call_id: call.id,
+                      content: `No player found matching "${name}". Try a different spelling or last name only.`,
+                    });
+                  } else {
+                    const summary = players.slice(0, 5).map((p) =>
+                      `${p.name} (${p.club}) — OVR ${p.overall}, POT ${p.potential}, Age ${p.age}, Pos: ${p.positions.join('/')}\n  PAC ${p.pace} | SHO ${p.shooting} | PAS ${p.passing} | DRI ${p.dribbling} | DEF ${p.defending} | PHY ${p.physical}`
+                    ).join('\n\n');
+                    conversation.push({
+                      role: 'tool',
+                      tool_call_id: call.id,
+                      content: `FC 26 Player Data (${players.length} match${players.length > 1 ? 'es' : ''}):\n\n${summary}`,
+                    });
+                  }
+                } catch {
+                  logEntry.status = 'error';
+                  conversation.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    content: 'Player lookup failed. Proceed with available information.',
+                  });
+                }
+
+                toolCallLog.push(logEntry);
+                send({
+                  type: 'tool_call',
+                  toolCall: { id: call.id, type: 'web_search', query, status: logEntry.status },
+                });
+              } else if (call.function.name === 'get_squad') {
+                const team = args.team as string;
+                const query = `Squad: ${team}`;
+                const logEntry: { id: string; query: string; status: 'complete' | 'error' } = { id: call.id, query, status: 'complete' };
+                send({ type: 'tool_call', toolCall: { id: call.id, type: 'web_search', query, status: 'pending' } });
+
+                try {
+                  const players = await getPlayersForClub(team);
+                  if (players.length === 0) {
+                    conversation.push({
+                      role: 'tool',
+                      tool_call_id: call.id,
+                      content: `No squad data found for "${team}". Try a 3-letter abbreviation (e.g. WHU, TOT, ARS).`,
+                    });
+                  } else {
+                    const sorted = [...players].sort((a, b) => b.overall - a.overall);
+                    const gkPlayers = sorted.filter((p) => p.positions.some((pos) => pos === 'GK'));
+                    const outfield = sorted.filter((p) => !p.positions.some((pos) => pos === 'GK'));
+                    const formatPlayer = (p: typeof sorted[number]) =>
+                      `  ${p.name} — OVR ${p.overall}, Pos: ${p.positions.join('/')}, Age ${p.age}`;
+
+                    const lines = [
+                      `${team} Squad (${players.length} players):`,
+                      '',
+                      'Goalkeepers:',
+                      ...gkPlayers.map(formatPlayer),
+                      '',
+                      'Outfield (by overall):',
+                      ...outfield.slice(0, 20).map(formatPlayer),
+                    ];
+
+                    if (outfield.length > 20) {
+                      lines.push(`  ... and ${outfield.length - 20} more`);
+                    }
+
+                    conversation.push({
+                      role: 'tool',
+                      tool_call_id: call.id,
+                      content: lines.join('\n'),
+                    });
+                  }
+                } catch {
+                  logEntry.status = 'error';
+                  conversation.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    content: 'Squad lookup failed. Proceed with available information.',
+                  });
+                }
+
+                toolCallLog.push(logEntry);
+                send({
+                  type: 'tool_call',
+                  toolCall: { id: call.id, type: 'web_search', query, status: logEntry.status },
+                });
+              }
+            }
+          }
+
+          send({ type: 'status', message: 'Max tool rounds reached, forcing conclusion...' });
+          conversation.push({
+            role: 'user',
+            content: 'Please provide your best estimate based on the research so far.',
+          });
+
+          const finalMessage = await callOpenRouter(conversation, { model, maxTokens: 1500 });
+          const parsed = parseAgentResponse(finalMessage.content ?? '', toolCallLog);
+          send({ type: 'final', data: parsed as unknown as Record<string, unknown> });
+          closeSafe();
+        } catch (error) {
+          console.error('Chat API error:', error);
+          send({ type: 'error', message: 'An error occurred. Please try again.' });
+          send({
+            type: 'final',
+            data: { content: 'An error occurred. Please try again.', toolCalls: [] },
+          });
+          closeSafe();
+        }
+      })();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  });
 }

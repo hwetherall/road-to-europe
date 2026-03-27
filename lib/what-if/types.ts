@@ -1,5 +1,3 @@
-// ── Squad Quality ──
-
 export interface PlayerQuality {
   name: string;
   overall: number;
@@ -31,8 +29,6 @@ export interface SquadProfile {
   totalSquadValue: number;
 }
 
-// ── Scenario System ──
-
 export interface ScenarioModification {
   type: 'team_quality_delta' | 'fixture_lock' | 'probability_modifier' | 'competition_withdrawal';
   description: string;
@@ -56,11 +52,17 @@ export interface CounterfactualScenario {
     | 'perfect_world';
   description: string;
   modifications: ScenarioModification[];
+  fixtureLocks?: Array<{
+    fixtureId: string;
+    result: 'home' | 'draw' | 'away';
+  }>;
   simulationResult: {
     targetMetric: string;
     baselineOdds: number;
     modifiedOdds: number;
     delta: number;
+    modifiedExpectedPoints?: number;
+    modifiedExpectedPosition?: number;
   };
   plausibility: {
     score: number;
@@ -70,32 +72,45 @@ export interface CounterfactualScenario {
   iteration: number;
 }
 
-// ── Analysis Output ──
+export interface WhatIfSearchTraceEntry {
+  phase: 'diagnose' | 'hypothesise' | 'stress-test' | 'synthesise';
+  query: string;
+  provider: 'serper' | 'tavily' | 'unavailable';
+  resultCount: number;
+}
+
+export const WHAT_IF_ANALYSIS_VERSION = '2026-03-26-searchtrail-v3';
 
 export interface WhatIfAnalysis {
   id: string;
+  version: string;
   generatedAt: number;
   targetTeam: string;
   targetTeamName: string;
   targetMetric: string;
   targetMetricLabel: string;
   baselineOdds: number;
-
+  baselineExpectedPoints?: number;
+  baselineExpectedPosition?: number;
   diagnosis: {
     squadQualityRank: number;
     gapToTopSquad: number;
     keyBottlenecks: string[];
     narrativeSummary: string;
+    departedPlayers?: {
+      name: string;
+      to: string;
+      fee: string;
+      overall: number;
+      position: string;
+    }[];
   };
-
   scenarios: CounterfactualScenario[];
   perfectWorld: CounterfactualScenario;
-
   stressTest: {
     feasibleScenarios: CounterfactualScenario[];
     infeasibleReasons: Record<string, string[]>;
   };
-
   narrative: {
     perfectWorldSection: string;
     realityCheckSection: string;
@@ -103,16 +118,14 @@ export interface WhatIfAnalysis {
     longTermPerspective: string;
     bottomLine: string;
   };
-
   totalIterations: number;
   totalSimulations: number;
   totalWebSearches: number;
   totalLLMCalls: number;
   wallClockTimeMs: number;
   costEstimate: number;
+  searchTrail: WhatIfSearchTraceEntry[];
 }
-
-// ── Supabase Cache ──
 
 export interface CachedWhatIfAnalysis {
   id: string;

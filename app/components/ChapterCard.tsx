@@ -41,7 +41,7 @@ export default function ChapterCard({ chapter, onRemove, onToggle }: Props) {
         <div className="text-xs text-white/80 truncate">{chapter.title}</div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] tracking-wider uppercase text-white/30">
-            {chapter.type === 'fixture_lock' ? 'Lock' : 'Modifier'}
+            {chapter.type === 'fixture_lock' ? 'Lock' : chapter.type === 'compound' ? 'Compound' : 'Modifier'}
           </span>
           {chapter.confidence && (
             <span

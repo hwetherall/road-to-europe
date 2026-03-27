@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ChatMessage } from '@/lib/chat-types';
 import { Team, SensitivityResult, DeepAnalysis } from '@/lib/types';
+import { consumeChatStream } from '@/lib/chat-stream';
 
 interface Props {
   accentColor: string;
@@ -168,15 +169,44 @@ export default function DeepAnalysisChat({ accentColor, selectedTeam, teams, sen
       });
 
       if (!res.ok) throw new Error('Chat request failed');
-      const data = await res.json();
 
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === thinkingId
-            ? { ...m, content: data.content ?? data.message ?? 'Sorry, I couldn\'t process that.', isThinking: false }
-            : m
-        )
-      );
+      await consumeChatStream(res, {
+        onStatus: (message) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === thinkingId
+                ? { ...m, content: message, isThinking: true }
+                : m
+            )
+          );
+        },
+        onFinal: (data) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === thinkingId
+                ? {
+                    ...m,
+                    content: (data.content as string | undefined) ?? (data.message as string | undefined) ?? 'Sorry, I couldn\'t process that.',
+                    isThinking: false,
+                  }
+                : m
+            )
+          );
+        },
+        onError: (message) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === thinkingId
+                ? {
+                    ...m,
+                    content: message || 'Sorry, I couldn\'t process that. Make sure the chat API is configured.',
+                    isThinking: false,
+                  }
+                : m
+            )
+          );
+        },
+      });
     } catch {
       setMessages((prev) =>
         prev.map((m) =>

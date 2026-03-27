@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { ChatMessage, ScenarioModification, ProposedOption } from '@/lib/chat-types';
+import { useEffect, useRef, useState } from 'react';
+import { ChatMessage, ScenarioModification, ProposedOption, TeamFixtureLock } from '@/lib/chat-types';
 
 function escapeHtml(text: string): string {
   return text
@@ -28,48 +28,152 @@ interface Props {
   messages: ChatMessage[];
   accentColor: string;
   onApplyModification: (modification: ScenarioModification, messageId: string) => void;
-  onApplyOption: (option: ProposedOption, messageId: string) => void;
+  onApplyOption: (option: ProposedOption, messageId: string, optionIndex: number) => void;
+  onUnapply: (appliedKey: string) => void;
   appliedMessageIds: Set<string>;
+}
+
+/** Small inline pp input used in tweak mode. */
+function DeltaInput({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+  const ppValue = Math.round(value * 100);
+  return (
+    <label className="inline-flex items-center gap-0.5 text-[11px] text-white/50">
+      <span className="text-white/40">{label}</span>
+      <input
+        type="number"
+        value={ppValue}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        className="w-10 bg-white/[0.06] border border-white/[0.12] rounded px-1 py-0.5 text-[11px] text-white/80 text-center outline-none focus:border-white/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      <span className="text-white/30">pp</span>
+    </label>
+  );
+}
+
+/** Display a team modification row (read-only). */
+function TeamModRow({ tm }: { tm: { team: string; homeWinDelta: number; drawDelta: number; awayWinDelta: number } }) {
+  return (
+    <div className="text-[11px] text-white/50 mb-1">
+      <span className="font-semibold text-white/70">{tm.team}</span>:{' '}
+      home {tm.homeWinDelta > 0 ? '+' : ''}
+      {(tm.homeWinDelta * 100).toFixed(0)}pp, draw{' '}
+      {tm.drawDelta > 0 ? '+' : ''}
+      {(tm.drawDelta * 100).toFixed(0)}pp, away{' '}
+      {tm.awayWinDelta > 0 ? '+' : ''}
+      {(tm.awayWinDelta * 100).toFixed(0)}pp
+    </div>
+  );
+}
+
+/** Editable team modification row. */
+function TeamModEditRow({
+  tm,
+  onChange,
+}: {
+  tm: { team: string; homeWinDelta: number; drawDelta: number; awayWinDelta: number };
+  onChange: (updated: typeof tm) => void;
+}) {
+  return (
+    <div className="text-[11px] text-white/50 mb-1.5">
+      <span className="font-semibold text-white/70 mr-1.5">{tm.team}</span>
+      <div className="flex flex-wrap gap-x-2 gap-y-1 mt-0.5">
+        <DeltaInput label="home" value={tm.homeWinDelta} onChange={(v) => onChange({ ...tm, homeWinDelta: v })} />
+        <DeltaInput label="draw" value={tm.drawDelta} onChange={(v) => onChange({ ...tm, drawDelta: v })} />
+        <DeltaInput label="away" value={tm.awayWinDelta} onChange={(v) => onChange({ ...tm, awayWinDelta: v })} />
+      </div>
+    </div>
+  );
 }
 
 function ModificationCard({
   modification,
   onApply,
+  onUnapply,
   applied,
 }: {
   modification: ScenarioModification;
-  onApply: () => void;
+  onApply: (tweaked: ScenarioModification) => void;
+  onUnapply: () => void;
   applied: boolean;
 }) {
+  const [tweaking, setTweaking] = useState(false);
+  const [editedMods, setEditedMods] = useState(modification.teamModifications);
+
+  const handleTeamChange = (index: number, updated: typeof editedMods[number]) => {
+    setEditedMods((prev) => prev.map((tm, i) => (i === index ? updated : tm)));
+  };
+
+  const handleApply = () => {
+    onApply({ ...modification, teamModifications: editedMods });
+    setTweaking(false);
+  };
+
   return (
     <div className="mt-2 rounded-lg border border-white/[0.10] bg-white/[0.03] p-3">
       <div className="text-[10px] text-white/40 tracking-wider uppercase mb-1.5">
         Proposed Modification
       </div>
       <div className="text-xs text-white/70 mb-2">{modification.description}</div>
-      {modification.teamModifications.map((tm, i) => (
-        <div key={i} className="text-[11px] text-white/50 mb-1">
-          <span className="font-semibold text-white/70">{tm.team}</span>:{' '}
-          home {tm.homeWinDelta > 0 ? '+' : ''}
-          {(tm.homeWinDelta * 100).toFixed(0)}pp, draw{' '}
-          {tm.drawDelta > 0 ? '+' : ''}
-          {(tm.drawDelta * 100).toFixed(0)}pp, away{' '}
-          {tm.awayWinDelta > 0 ? '+' : ''}
-          {(tm.awayWinDelta * 100).toFixed(0)}pp
-        </div>
-      ))}
+      {tweaking
+        ? editedMods.map((tm, i) => (
+            <TeamModEditRow key={i} tm={tm} onChange={(u) => handleTeamChange(i, u)} />
+          ))
+        : editedMods.map((tm, i) => <TeamModRow key={i} tm={tm} />)
+      }
       {applied ? (
-        <div className="mt-2 text-[11px] text-green-400/70">Applied</div>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-[11px] text-green-400/70">Applied</span>
+          <button
+            onClick={onUnapply}
+            className="px-2 py-1 rounded text-[10px] text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors cursor-pointer"
+          >
+            Unapply
+          </button>
+        </div>
       ) : (
         <div className="flex gap-2 mt-2">
           <button
-            onClick={onApply}
+            onClick={handleApply}
             className="px-3 py-1.5 rounded text-[11px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors cursor-pointer"
           >
             Apply
           </button>
+          <button
+            onClick={() => setTweaking(!tweaking)}
+            className={`px-3 py-1.5 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+              tweaking
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
+                : 'bg-white/[0.04] text-white/50 border-white/[0.12] hover:text-white/70 hover:border-white/20'
+            }`}
+          >
+            {tweaking ? 'Done' : 'Tweak'}
+          </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Inline selector for team fixture lock result in tweak mode. */
+function LockResultSelect({
+  lock,
+  onChange,
+}: {
+  lock: TeamFixtureLock;
+  onChange: (updated: TeamFixtureLock) => void;
+}) {
+  return (
+    <div className="text-[11px] text-white/50 mb-0.5 flex items-center gap-1.5">
+      <span className="font-semibold text-white/70">{lock.team}</span>
+      <select
+        value={lock.result}
+        onChange={(e) => onChange({ ...lock, result: e.target.value as TeamFixtureLock['result'] })}
+        className="bg-white/[0.06] border border-white/[0.12] rounded px-1 py-0.5 text-[11px] text-white/80 outline-none focus:border-white/30 cursor-pointer"
+      >
+        <option value="lose">loses all remaining</option>
+        <option value="win">wins all remaining</option>
+        <option value="draw">draws all remaining</option>
+      </select>
     </div>
   );
 }
@@ -78,13 +182,41 @@ function OptionCard({
   option,
   index,
   onApply,
+  onUnapply,
   applied,
 }: {
   option: ProposedOption;
   index: number;
-  onApply: () => void;
+  onApply: (tweaked: ProposedOption) => void;
+  onUnapply: () => void;
   applied: boolean;
 }) {
+  const [tweaking, setTweaking] = useState(false);
+  const [editedMods, setEditedMods] = useState(option.modification?.teamModifications ?? []);
+  const [editedLocks, setEditedLocks] = useState<TeamFixtureLock[]>(option.teamFixtureLocks ?? []);
+
+  const hasTweakableContent = (option.modification?.teamModifications?.length ?? 0) > 0 || (option.teamFixtureLocks?.length ?? 0) > 0;
+
+  const handleTeamChange = (index: number, updated: typeof editedMods[number]) => {
+    setEditedMods((prev) => prev.map((tm, i) => (i === index ? updated : tm)));
+  };
+
+  const handleLockChange = (index: number, updated: TeamFixtureLock) => {
+    setEditedLocks((prev) => prev.map((l, i) => (i === index ? updated : l)));
+  };
+
+  const handleApply = () => {
+    const tweaked: ProposedOption = {
+      ...option,
+      teamFixtureLocks: editedLocks.length > 0 ? editedLocks : option.teamFixtureLocks,
+      modification: option.modification
+        ? { ...option.modification, teamModifications: editedMods }
+        : undefined,
+    };
+    onApply(tweaked);
+    setTweaking(false);
+  };
+
   const label = String.fromCharCode(65 + index); // A, B, C...
   return (
     <div className="mt-2 rounded-lg border border-white/[0.10] bg-white/[0.03] p-3">
@@ -101,28 +233,74 @@ function OptionCard({
           </span>
         )}
       </div>
-      {option.modification?.teamModifications.map((tm, i) => (
-        <div key={i} className="text-[11px] text-white/50 mb-1">
-          <span className="font-semibold text-white/70">{tm.team}</span>:{' '}
-          home {tm.homeWinDelta > 0 ? '+' : ''}{(tm.homeWinDelta * 100).toFixed(0)}pp,{' '}
-          draw {tm.drawDelta > 0 ? '+' : ''}{(tm.drawDelta * 100).toFixed(0)}pp,{' '}
-          away {tm.awayWinDelta > 0 ? '+' : ''}{(tm.awayWinDelta * 100).toFixed(0)}pp
+
+      {/* Team fixture locks */}
+      {editedLocks.length > 0 && (
+        <div className="mb-1.5">
+          {tweaking
+            ? editedLocks.map((lock, i) => (
+                <LockResultSelect key={i} lock={lock} onChange={(u) => handleLockChange(i, u)} />
+              ))
+            : editedLocks.map((lock, i) => (
+                <div key={i} className="text-[11px] text-white/50 mb-0.5">
+                  <span className="font-semibold text-white/70">{lock.team}</span>{' '}
+                  <span className={
+                    lock.result === 'lose' ? 'text-red-400/70' : lock.result === 'win' ? 'text-green-400/70' : 'text-amber-400/70'
+                  }>
+                    {lock.result === 'lose' ? 'loses' : lock.result === 'win' ? 'wins' : 'draws'} all remaining
+                  </span>
+                </div>
+              ))
+          }
         </div>
-      ))}
+      )}
+
+      {/* Probability modifications */}
+      {editedMods.length > 0 && (
+        tweaking
+          ? editedMods.map((tm, i) => (
+              <TeamModEditRow key={i} tm={tm} onChange={(u) => handleTeamChange(i, u)} />
+            ))
+          : editedMods.map((tm, i) => <TeamModRow key={i} tm={tm} />)
+      )}
+
       {option.fixtureLock && (
         <div className="text-[11px] text-white/50">
           Lock: {option.fixtureLock.fixtureId} &rarr; {option.fixtureLock.result}
         </div>
       )}
+
       {applied ? (
-        <div className="mt-2 text-[11px] text-green-400/70">Applied</div>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-[11px] text-green-400/70">Applied</span>
+          <button
+            onClick={onUnapply}
+            className="px-2 py-1 rounded text-[10px] text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 transition-colors cursor-pointer"
+          >
+            Unapply
+          </button>
+        </div>
       ) : (
-        <button
-          onClick={onApply}
-          className="mt-2 px-3 py-1.5 rounded text-[11px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors cursor-pointer"
-        >
-          Apply
-        </button>
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={handleApply}
+            className="px-3 py-1.5 rounded text-[11px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors cursor-pointer"
+          >
+            Apply
+          </button>
+          {hasTweakableContent && (
+            <button
+              onClick={() => setTweaking(!tweaking)}
+              className={`px-3 py-1.5 rounded text-[11px] font-semibold border transition-colors cursor-pointer ${
+                tweaking
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
+                  : 'bg-white/[0.04] text-white/50 border-white/[0.12] hover:text-white/70 hover:border-white/20'
+              }`}
+            >
+              {tweaking ? 'Done' : 'Tweak'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -143,7 +321,7 @@ function ToolCallDisplay({ toolCall }: { toolCall: { query: string; status: stri
   );
 }
 
-export default function ChatThread({ messages, accentColor, onApplyModification, onApplyOption, appliedMessageIds }: Props) {
+export default function ChatThread({ messages, accentColor, onApplyModification, onApplyOption, onUnapply, appliedMessageIds }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -210,7 +388,8 @@ export default function ChatThread({ messages, accentColor, onApplyModification,
               {msg.proposedModification && !msg.proposedOptions && (
                 <ModificationCard
                   modification={msg.proposedModification}
-                  onApply={() => onApplyModification(msg.proposedModification!, msg.id)}
+                  onApply={(tweaked) => onApplyModification(tweaked, msg.id)}
+                  onUnapply={() => onUnapply(msg.id)}
                   applied={appliedMessageIds.has(msg.id)}
                 />
               )}
@@ -222,7 +401,8 @@ export default function ChatThread({ messages, accentColor, onApplyModification,
                       key={i}
                       option={opt}
                       index={i}
-                      onApply={() => onApplyOption(opt, msg.id)}
+                      onApply={(tweaked) => onApplyOption(tweaked, msg.id, i)}
+                      onUnapply={() => onUnapply(`${msg.id}-opt-${i}`)}
                       applied={appliedMessageIds.has(`${msg.id}-opt-${i}`)}
                     />
                   ))}

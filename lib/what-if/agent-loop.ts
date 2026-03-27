@@ -24,6 +24,7 @@ export interface AgentLoopResult {
   finalContent: string;
   toolCallLog: ToolCallRecord[];
   rounds: number;
+  llmCalls: number;
 }
 
 // ── Agent Loop ──
@@ -46,8 +47,10 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
   ];
 
   const toolCallLog: ToolCallRecord[] = [];
+  let llmCalls = 0;
 
   for (let round = 0; round < maxRounds; round++) {
+    llmCalls++;
     const message = await callOpenRouter(conversation, {
       model,
       tools,
@@ -60,6 +63,7 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
         finalContent: message.content ?? '',
         toolCallLog,
         rounds: round + 1,
+        llmCalls,
       };
     }
 
@@ -108,11 +112,13 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
     content: 'You have reached the maximum number of tool calls. Please output your final answer now based on everything you have gathered so far.',
   });
 
+  llmCalls++;
   const finalMessage = await callOpenRouter(conversation, { model, maxTokens });
 
   return {
     finalContent: finalMessage.content ?? '',
     toolCallLog,
     rounds: maxRounds,
+    llmCalls,
   };
 }

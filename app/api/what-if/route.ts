@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Team, Fixture, SimulationResult } from '@/lib/types';
 import { simulateFull } from '@/lib/server-simulation';
+import { simulateFullSeason } from '@/lib/what-if/full-season-sim';
 import { agentLoop } from '@/lib/what-if/agent-loop';
-import { WHAT_IF_TOOLS, createToolExecutors } from '@/lib/what-if/tools';
+import { WHAT_IF_TOOLS, createToolExecutors, FullSeasonBaseline } from '@/lib/what-if/tools';
 import {
   buildDiagnosisPrompt,
   buildHypothesisePrompt,
   buildStressTestPrompt,
   buildSynthesisPrompt,
+  buildSquadContext,
 } from '@/lib/what-if/prompts';
-import { CounterfactualScenario, WhatIfAnalysis } from '@/lib/what-if/types';
+import {
+  CounterfactualScenario,
+  WhatIfAnalysis,
+  WHAT_IF_ANALYSIS_VERSION,
+  WhatIfSearchTraceEntry,
+} from '@/lib/what-if/types';
 import {
   createWhatIfScenarioKey,
   getCachedWhatIfAnalysis,
@@ -29,6 +36,45 @@ const METRIC_LABELS: Record<string, string> = {
   top7Pct: 'Top 7 (Any Europe)',
   relegationPct: 'Relegation',
   survivalPct: 'Survival',
+};
+
+function determinePragmaticMetric(position: number): string {
+  if (position >= 15) return 'survivalPct';
+  if (position >= 8) return 'top10';
+  return 'top7Pct';
+}
+
+function readPragmaticMetric(result: SimulationResult | undefined, metric: string): number {
+  if (!result) return 0;
+  if (metric === 'survivalPct') return result.survivalPct;
+  if (metric === 'top10') {
+    return result.positionDistribution.slice(0, 10).reduce((a, b) => a + b, 0)
+      / result.positionDistribution.reduce((a, b) => a + b, 0) * 100;
+  }
+  return (result as unknown as Record<string, number>)[metric] ?? 0;
+}
+
+const PRAGMATIC_METRIC_LABELS: Record<string, string> = {
+  survivalPct: 'Premier League survival',
+  top10: 'a top-10 finish',
+  top7Pct: 'European qualification',
+  top4Pct: 'Champions League qualification',
+};
+
+interface PhaseStats {
+  webSearches: number;
+  llmCalls: number;
+  simulationCalls: number;
+  wallClockMs: number;
+  searchTrail: WhatIfSearchTraceEntry[];
+}
+
+const EMPTY_PHASE_STATS: PhaseStats = {
+  webSearches: 0,
+  llmCalls: 0,
+  simulationCalls: 0,
+  wallClockMs: 0,
+  searchTrail: [],
 };
 
 // ── Helper: parse JSON from LLM output ──
@@ -52,6 +98,28 @@ function extractJSON(content: string): Record<string, unknown> | null {
   }
 }
 
+// ── Compute full-season baseline once ──
+
+function computeFullSeasonBaseline(
+  teams: Team[],
+  fixtures: Fixture[],
+  targetTeam: string,
+  targetMetric: keyof SimulationResult
+): FullSeasonBaseline {
+  const results = simulateFullSeason({
+    teams,
+    fixtures,
+    modifications: [],
+    numSims: 10000,
+  });
+  const targetResult = results.find((r) => r.team === targetTeam);
+  return {
+    targetMetricPct: targetResult ? (targetResult[targetMetric] as number) : 0,
+    expectedPoints: targetResult?.avgPoints ?? 0,
+    expectedPosition: targetResult?.avgPosition ?? 0,
+  };
+}
+
 // ── Main Handler ──
 
 export async function POST(req: NextRequest) {
@@ -67,6 +135,7 @@ export async function POST(req: NextRequest) {
       diagnosis,
       scenarios: clientScenarios,
       stressTest: clientStressTest,
+      pipelineStats,
       forceRefresh,
     } = body as {
       action: 'start' | 'diagnose' | 'hypothesise' | 'stress-test' | 'synthesise';
@@ -74,9 +143,16 @@ export async function POST(req: NextRequest) {
       targetMetric: keyof SimulationResult;
       teams: Team[];
       fixtures: Fixture[];
-      diagnosis?: { squadQualityRank: number; gapToTopSquad: number; keyBottlenecks: string[]; narrativeSummary: string };
+      diagnosis?: {
+        squadQualityRank: number;
+        gapToTopSquad: number;
+        keyBottlenecks: string[];
+        narrativeSummary: string;
+        departedPlayers?: { name: string; to: string; fee: string; overall: number; position: string }[];
+      };
       scenarios?: CounterfactualScenario[];
       stressTest?: string;
+      pipelineStats?: PhaseStats;
       forceRefresh?: boolean;
     };
 
@@ -86,6 +162,7 @@ export async function POST(req: NextRequest) {
 
     // ── ACTION: start ──
     if (action === 'start') {
+      const startedAt = Date.now();
       // Check cache
       if (!forceRefresh && isWhatIfCacheConfigured()) {
         const scenarioKey = createWhatIfScenarioKey({ targetTeam, targetMetric, teams, fixtures });
@@ -100,10 +177,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Run baseline simulation
+      // Run baseline simulation (remaining-games, for current-season odds display)
       const baselineResults = simulateFull(teams, fixtures, 10000);
       const targetResult = baselineResults.find((r) => r.team === targetTeam);
       const baselineOdds = targetResult ? (targetResult[targetMetric] as number) : 0;
+
+      // Also compute full-season baseline for the What-If pipeline
+      const fullSeasonBaseline = computeFullSeasonBaseline(teams, fixtures, targetTeam, targetMetric);
 
       // Get team info
       const team = teams.find((t) => t.abbr === targetTeam);
@@ -111,13 +191,23 @@ export async function POST(req: NextRequest) {
       const position = sortedTeams.findIndex((t) => t.abbr === targetTeam) + 1;
       const gamesRemaining = 38 - (team?.played ?? 0);
 
+      // Pre-compute squad context
+      const teamName = team?.name ?? targetTeam;
+      const squadContext = await buildSquadContext(teamName);
+
       return NextResponse.json({
         cached: false,
         baselineOdds,
+        fullSeasonBaseline,
+        squadContext,
         position,
         points: team?.points ?? 0,
         gamesRemaining,
         targetMetricLabel: METRIC_LABELS[targetMetric] ?? targetMetric,
+        stats: {
+          ...EMPTY_PHASE_STATS,
+          wallClockMs: Date.now() - startedAt,
+        },
       });
     }
 
@@ -128,6 +218,7 @@ export async function POST(req: NextRequest) {
 
     // ── ACTION: diagnose ──
     if (action === 'diagnose') {
+      const startedAt = Date.now();
       const baselineResults = simulateFull(teams, fixtures, 10000);
       const targetResult = baselineResults.find((r) => r.team === targetTeam);
       const baselineOdds = targetResult ? (targetResult[targetMetric] as number) : 0;
@@ -143,13 +234,26 @@ export async function POST(req: NextRequest) {
 
       const teamName = team?.name ?? targetTeam;
 
+      // Pre-compute squad context for diagnosis
+      const squadContext = await buildSquadContext(teamName);
+
       // Diagnosis agent: compare_squads + web_search only
       const diagnosisTools = WHAT_IF_TOOLS.filter((t) =>
         ['compare_squads', 'web_search'].includes(t.function.name)
       );
 
       const scenarioAccumulator: CounterfactualScenario[] = [];
-      const executors = createToolExecutors(teams, fixtures, targetTeam, targetMetric, scenarioAccumulator);
+      const searchTrail: WhatIfSearchTraceEntry[] = [];
+      const executors = createToolExecutors(
+        teams,
+        fixtures,
+        targetTeam,
+        targetMetric,
+        scenarioAccumulator,
+        undefined,
+        searchTrail,
+        'diagnose'
+      );
 
       const prompt = buildDiagnosisPrompt({
         teamName,
@@ -161,6 +265,9 @@ export async function POST(req: NextRequest) {
         points: team?.points ?? 0,
         gamesRemaining,
         standingsSummary,
+        teams,
+        fixtures,
+        squadContext,
       });
 
       const result = await agentLoop({
@@ -173,6 +280,13 @@ export async function POST(req: NextRequest) {
       });
 
       const parsed = extractJSON(result.finalContent);
+      const stats: PhaseStats = {
+        webSearches: result.toolCallLog.filter((call) => call.toolName === 'web_search').length,
+        llmCalls: result.llmCalls,
+        simulationCalls: result.toolCallLog.filter((call) => call.toolName === 'run_simulation').length,
+        wallClockMs: Date.now() - startedAt,
+        searchTrail,
+      };
 
       return NextResponse.json({
         phase: 'diagnose',
@@ -185,18 +299,19 @@ export async function POST(req: NextRequest) {
         },
         toolCalls: result.toolCallLog.length,
         rounds: result.rounds,
+        stats,
       });
     }
 
     // ── ACTION: hypothesise ──
     if (action === 'hypothesise') {
+      const startedAt = Date.now();
       if (!diagnosis) {
         return NextResponse.json({ error: 'Missing diagnosis data' }, { status: 400 });
       }
 
-      const baselineResults = simulateFull(teams, fixtures, 10000);
-      const targetResult = baselineResults.find((r) => r.team === targetTeam);
-      const baselineOdds = targetResult ? (targetResult[targetMetric] as number) : 0;
+      // Compute full-season baseline (cached for this phase)
+      const fullSeasonBaseline = computeFullSeasonBaseline(teams, fixtures, targetTeam, targetMetric);
 
       const team = teams.find((t) => t.abbr === targetTeam);
       const sortedTeams = [...teams].sort((a, b) => b.points - a.points || b.goalDifference - a.goalDifference);
@@ -208,23 +323,43 @@ export async function POST(req: NextRequest) {
         .map((t, i) => `${i + 1}. ${t.abbr} ${t.points}pts`)
         .join('\n');
 
-      // Find fixture IDs involving the target team
-      const teamFixtureIds = fixtures
-        .filter((f) => f.status === 'SCHEDULED' && (f.homeTeam === targetTeam || f.awayTeam === targetTeam))
-        .map((f) => f.id);
+      const fixtureCatalog = fixtures
+        .filter((f) => f.status === 'SCHEDULED')
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((f) => {
+          const tags: string[] = [];
+          if (f.homeTeam === targetTeam || f.awayTeam === targetTeam) {
+            tags.push('target team');
+          }
+          return `${f.id}: ${f.homeTeam} vs ${f.awayTeam}${tags.length > 0 ? ` [${tags.join(', ')}]` : ''}`;
+        })
+        .join('\n');
+
+      // Pre-compute squad context
+      const squadContext = await buildSquadContext(teamName);
 
       const scenarioAccumulator: CounterfactualScenario[] = [
         ...(clientScenarios ?? []),
       ];
 
-      const executors = createToolExecutors(teams, fixtures, targetTeam, targetMetric, scenarioAccumulator);
+      const searchTrail: WhatIfSearchTraceEntry[] = [];
+      const executors = createToolExecutors(
+        teams,
+        fixtures,
+        targetTeam,
+        targetMetric,
+        scenarioAccumulator,
+        fullSeasonBaseline,
+        searchTrail,
+        'hypothesise'
+      );
 
       const prompt = buildHypothesisePrompt({
         teamName,
         teamAbbr: targetTeam,
         targetLabel: METRIC_LABELS[targetMetric] ?? targetMetric,
         targetMetric,
-        baselineOdds,
+        baselineOdds: fullSeasonBaseline.targetMetricPct,
         position,
         points: team?.points ?? 0,
         gamesRemaining,
@@ -234,7 +369,12 @@ export async function POST(req: NextRequest) {
         squadAvg: 0, // Will be filled by compare_squads call
         gapToTop: diagnosis.gapToTopSquad,
         bottlenecks: diagnosis.keyBottlenecks,
-        fixtureIds: teamFixtureIds,
+        fixtureCatalog,
+        teams,
+        fixtures,
+        squadContext,
+        departedPlayers: diagnosis.departedPlayers,
+        baselineExpectedPoints: fullSeasonBaseline.expectedPoints,
       });
 
       const result = await agentLoop({
@@ -253,11 +393,19 @@ export async function POST(req: NextRequest) {
         toolCalls: result.toolCallLog.length,
         rounds: result.rounds,
         summary: extractJSON(result.finalContent),
+        stats: {
+          webSearches: result.toolCallLog.filter((call) => call.toolName === 'web_search').length,
+          llmCalls: result.llmCalls,
+          simulationCalls: result.toolCallLog.filter((call) => call.toolName === 'run_simulation').length,
+          wallClockMs: Date.now() - startedAt,
+          searchTrail,
+        },
       });
     }
 
     // ── ACTION: stress-test ──
     if (action === 'stress-test') {
+      const startedAt = Date.now();
       const scenarios = clientScenarios ?? [];
       if (scenarios.length === 0) {
         return NextResponse.json({ error: 'No scenarios to stress-test' }, { status: 400 });
@@ -266,15 +414,32 @@ export async function POST(req: NextRequest) {
       const team = teams.find((t) => t.abbr === targetTeam);
       const teamName = team?.name ?? targetTeam;
 
+      // Pre-compute squad context
+      const squadContext = await buildSquadContext(teamName);
+
       // Stress test agent: web_search only
       const stressTestTools = WHAT_IF_TOOLS.filter((t) => t.function.name === 'web_search');
       const scenarioAccumulator: CounterfactualScenario[] = [];
-      const executors = createToolExecutors(teams, fixtures, targetTeam, targetMetric, scenarioAccumulator);
+      const searchTrail: WhatIfSearchTraceEntry[] = [];
+      const executors = createToolExecutors(
+        teams,
+        fixtures,
+        targetTeam,
+        targetMetric,
+        scenarioAccumulator,
+        undefined,
+        searchTrail,
+        'stress-test'
+      );
 
       const prompt = buildStressTestPrompt({
         teamName,
         targetLabel: METRIC_LABELS[targetMetric] ?? targetMetric,
         scenarios: scenarios.slice(0, 5), // Top 5 only
+        teams,
+        fixtures,
+        squadContext,
+        departedPlayers: diagnosis?.departedPlayers,
       });
 
       const result = await agentLoop({
@@ -293,34 +458,106 @@ export async function POST(req: NextRequest) {
         parsed: extractJSON(result.finalContent),
         toolCalls: result.toolCallLog.length,
         rounds: result.rounds,
+        stats: {
+          webSearches: result.toolCallLog.filter((call) => call.toolName === 'web_search').length,
+          llmCalls: result.llmCalls,
+          simulationCalls: result.toolCallLog.filter((call) => call.toolName === 'run_simulation').length,
+          wallClockMs: Date.now() - startedAt,
+          searchTrail,
+        },
       });
     }
 
     // ── ACTION: synthesise ──
     if (action === 'synthesise') {
+      const startedAt = Date.now();
       const scenarios = clientScenarios ?? [];
       const stressTestFindings = clientStressTest ?? 'No stress test data available.';
 
       const team = teams.find((t) => t.abbr === targetTeam);
       const teamName = team?.name ?? targetTeam;
 
-      const baselineResults = simulateFull(teams, fixtures, 10000);
-      const targetResult = baselineResults.find((r) => r.team === targetTeam);
-      const baselineOdds = targetResult ? (targetResult[targetMetric] as number) : 0;
+      // Use full-season baseline for synthesis context
+      const fullSeasonBaseline = computeFullSeasonBaseline(teams, fixtures, targetTeam, targetMetric);
+      const baselineOdds = fullSeasonBaseline.targetMetricPct;
 
       const perfectWorld = scenarios.find((s) => s.category === 'perfect_world');
       const perfectWorldOdds = perfectWorld?.simulationResult.modifiedOdds ?? baselineOdds;
 
+      const sortedTeams = [...teams].sort((a, b) => b.points - a.points || b.goalDifference - a.goalDifference);
+      const currentPosition = sortedTeams.findIndex((t) => t.abbr === targetTeam) + 1;
+
+      // ── Compute pragmatic redirect numbers ──
+      const bestRealistic = scenarios
+        .filter(s => s.category !== 'perfect_world' && s.plausibility.score >= 15)
+        .sort((a, b) => b.simulationResult.delta * b.plausibility.score
+                       - a.simulationResult.delta * a.plausibility.score)[0];
+
+      const pragmaticMetric = determinePragmaticMetric(currentPosition);
+
+      let pragmaticSimResult: {
+        metric: string;
+        metricLabel: string;
+        baselineValue: number;
+        modifiedValue: number;
+        scenarioTitle: string;
+        baselineExpectedPoints: number;
+        modifiedExpectedPoints: number;
+        baselineExpectedPosition: number;
+        modifiedExpectedPosition: number;
+      } | null = null;
+
+      if (bestRealistic && pragmaticMetric !== targetMetric) {
+        const pragmaticResults = simulateFullSeason({
+          teams,
+          fixtures,
+          modifications: bestRealistic.modifications.map(m => ({
+            teamAbbr: m.teamAbbr ?? '',
+            homeWinDelta: m.homeWinDelta ?? 0,
+            awayWinDelta: m.awayWinDelta ?? 0,
+            drawDelta: m.drawDelta ?? 0,
+          })),
+          numSims: 10000,
+        });
+
+        const pragmaticTarget = pragmaticResults.find(r => r.team === targetTeam);
+        const baselineResultsForPragmatic = simulateFullSeason({
+          teams,
+          fixtures,
+          modifications: [],
+          numSims: 10000,
+        });
+        const baselineForPragmatic = baselineResultsForPragmatic.find(r => r.team === targetTeam);
+
+        pragmaticSimResult = {
+          metric: pragmaticMetric,
+          metricLabel: PRAGMATIC_METRIC_LABELS[pragmaticMetric] ?? pragmaticMetric,
+          baselineValue: readPragmaticMetric(baselineForPragmatic, pragmaticMetric),
+          modifiedValue: readPragmaticMetric(pragmaticTarget, pragmaticMetric),
+          scenarioTitle: bestRealistic.title,
+          baselineExpectedPoints: baselineForPragmatic?.avgPoints ?? 0,
+          modifiedExpectedPoints: pragmaticTarget?.avgPoints ?? 0,
+          baselineExpectedPosition: baselineForPragmatic?.avgPosition ?? 0,
+          modifiedExpectedPosition: pragmaticTarget?.avgPosition ?? 0,
+        };
+      }
+
       const prompt = buildSynthesisPrompt({
         teamName,
-        teamAbbr: targetTeam,
         targetLabel: METRIC_LABELS[targetMetric] ?? targetMetric,
         targetMetric,
         baselineOdds,
+        baselineExpectedPoints: fullSeasonBaseline.expectedPoints,
+        baselineExpectedPosition: fullSeasonBaseline.expectedPosition,
+        currentPosition,
         diagnosisNarrative: diagnosis?.narrativeSummary ?? '',
         scenarios,
         stressTestFindings,
         perfectWorldOdds,
+        departedPlayers: diagnosis?.departedPlayers,
+        pragmaticSimResult,
+        teams,
+        fixtures,
       });
 
       // Synthesis doesn't need tools
@@ -333,17 +570,28 @@ export async function POST(req: NextRequest) {
         { maxTokens: 6000 }
       );
 
+      const combinedStats: PhaseStats = {
+        webSearches: pipelineStats?.webSearches ?? 0,
+        llmCalls: (pipelineStats?.llmCalls ?? 0) + 1,
+        simulationCalls: pipelineStats?.simulationCalls ?? 0,
+        wallClockMs: (pipelineStats?.wallClockMs ?? 0) + (Date.now() - startedAt),
+        searchTrail: pipelineStats?.searchTrail ?? [],
+      };
+
       const narrative = extractJSON(message.content ?? '');
 
       // Build final analysis
       const analysis: WhatIfAnalysis = {
         id: `whatif-${targetTeam}-${targetMetric}-${Date.now()}`,
+        version: WHAT_IF_ANALYSIS_VERSION,
         generatedAt: Date.now(),
         targetTeam,
         targetTeamName: teamName,
         targetMetric,
         targetMetricLabel: METRIC_LABELS[targetMetric] ?? targetMetric,
         baselineOdds,
+        baselineExpectedPoints: fullSeasonBaseline.expectedPoints,
+        baselineExpectedPosition: fullSeasonBaseline.expectedPosition,
         diagnosis: diagnosis ?? {
           squadQualityRank: 0,
           gapToTopSquad: 0,
@@ -364,11 +612,14 @@ export async function POST(req: NextRequest) {
           bottomLine: (narrative?.bottomLine as string) ?? '',
         },
         totalIterations: scenarios.length,
-        totalSimulations: scenarios.length + 1,
-        totalWebSearches: 0,
-        totalLLMCalls: 0,
-        wallClockTimeMs: 0,
-        costEstimate: 0,
+        totalSimulations: combinedStats.simulationCalls,
+        totalWebSearches: combinedStats.webSearches,
+        totalLLMCalls: combinedStats.llmCalls,
+        wallClockTimeMs: combinedStats.wallClockMs,
+        costEstimate: Math.round(
+          (combinedStats.llmCalls * 0.025 + combinedStats.webSearches * 0.005) * 100
+        ) / 100,
+        searchTrail: combinedStats.searchTrail,
       };
 
       // Cache the result
@@ -390,6 +641,9 @@ export async function POST(req: NextRequest) {
         phase: 'synthesise',
         status: 'complete',
         analysis,
+        stats: {
+          ...combinedStats,
+        },
       });
     }
 

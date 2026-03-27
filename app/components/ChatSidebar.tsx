@@ -6,6 +6,7 @@ import ChaptersPanel from './ChaptersPanel';
 import ChatThread from './ChatThread';
 import ChatInput from './ChatInput';
 import { Team, SimulationResult, SensitivityResult } from '@/lib/types';
+import { consumeChatStream, upsertToolCall } from '@/lib/chat-stream';
 
 interface Props {
   isOpen: boolean;
@@ -46,11 +47,14 @@ export default function ChatSidebar({
   const [isProcessing, setIsProcessing] = useState(false);
   const [mode, setMode] = useState<'fast' | 'deep'>('fast');
   const [appliedMessageIds, setAppliedMessageIds] = useState<Set<string>>(new Set());
+  /** Maps appliedKey → chapterId so we can unapply (remove the chapter). */
+  const appliedChapterMapRef = useRef<Record<string, string>>({});
   const responseMetadataRef = useRef<Record<string, {
     title?: string;
     confidence?: 'high' | 'medium' | 'low';
     reasoning?: string;
     proposedLock?: { fixtureId: string; result: 'home' | 'draw' | 'away' };
+    proposedTeamLocks?: Array<{ team: string; result: 'win' | 'lose' | 'draw' }>;
   }>>({});
   const pendingLocksRef = useRef<Record<string, { fixtureId: string; result: 'home' | 'draw' | 'away' }>>({});
   /** Incremented on chat reset so in-flight requests ignore stale responses. */
@@ -63,6 +67,7 @@ export default function ChatSidebar({
     setIsProcessing(false);
     responseMetadataRef.current = {};
     pendingLocksRef.current = {};
+    appliedChapterMapRef.current = {};
   }, []);
 
   const handleSend = useCallback(
@@ -112,41 +117,71 @@ export default function ChatSidebar({
 
         if (!res.ok) throw new Error('Chat request failed');
 
-        const data = await res.json();
+        await consumeChatStream(res, {
+          onStatus: (message) => {
+            if (session !== chatSessionRef.current) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === thinkingId
+                  ? { ...m, content: message, isThinking: true }
+                  : m
+              )
+            );
+          },
+          onToolCall: (toolCall) => {
+            if (session !== chatSessionRef.current) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === thinkingId
+                  ? { ...m, toolCalls: upsertToolCall(m.toolCalls, toolCall), isThinking: true }
+                  : m
+              )
+            );
+          },
+          onFinal: (data) => {
+            if (session !== chatSessionRef.current) return;
 
-        if (session !== chatSessionRef.current) return;
+            const responseMetadata = {
+              title: data.title as string | undefined,
+              confidence: data.confidence as 'high' | 'medium' | 'low' | undefined,
+              reasoning: data.reasoning as string | undefined,
+              proposedLock: data.proposedLock as { fixtureId: string; result: 'home' | 'draw' | 'away' } | undefined,
+            };
 
-        // Store metadata from the response for chapter creation
-        const responseMetadata = {
-          title: data.title as string | undefined,
-          confidence: data.confidence as 'high' | 'medium' | 'low' | undefined,
-          reasoning: data.reasoning as string | undefined,
-          proposedLock: data.proposedLock as { fixtureId: string; result: 'home' | 'draw' | 'away' } | undefined,
-        };
+            const assistantMessage: ChatMessage = {
+              id: thinkingId,
+              role: 'assistant',
+              content: (data.content as string | undefined) ?? (data.message as string | undefined) ?? 'I couldn\'t process that request.',
+              timestamp: Date.now(),
+              proposedModification: data.proposedModification as ChatMessage['proposedModification'],
+              proposedOptions: data.proposedOptions as ChatMessage['proposedOptions'],
+              toolCalls: (data.toolCalls as ChatMessage['toolCalls']) ?? undefined,
+            };
 
-        // Replace thinking message with actual response
-        const assistantMessage: ChatMessage = {
-          id: thinkingId,
-          role: 'assistant',
-          content: data.content ?? data.message ?? 'I couldn\'t process that request.',
-          timestamp: Date.now(),
-          proposedModification: data.proposedModification ?? undefined,
-          proposedOptions: data.proposedOptions ?? undefined,
-          toolCalls: data.toolCalls ?? undefined,
-        };
+            setMessages((prev) =>
+              prev.map((m) => (m.id === thinkingId ? assistantMessage : m))
+            );
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === thinkingId ? assistantMessage : m))
-        );
-
-        // Store response metadata for later use when applying
-        responseMetadataRef.current[thinkingId] = responseMetadata;
-
-        // If there's a proposed fixture lock (no user action needed beyond Apply),
-        // store it for the Apply handler
-        if (responseMetadata.proposedLock) {
-          pendingLocksRef.current[thinkingId] = responseMetadata.proposedLock;
-        }
+            responseMetadataRef.current[thinkingId] = responseMetadata;
+            if (responseMetadata.proposedLock) {
+              pendingLocksRef.current[thinkingId] = responseMetadata.proposedLock;
+            }
+          },
+          onError: (message) => {
+            if (session !== chatSessionRef.current) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === thinkingId
+                  ? {
+                      ...m,
+                      content: message || 'Sorry, I couldn\'t process that. Make sure the chat API is configured.',
+                      isThinking: false,
+                    }
+                  : m
+              )
+            );
+          },
+        });
       } catch {
         if (session !== chatSessionRef.current) return;
         // Replace thinking with error
@@ -173,6 +208,7 @@ export default function ChatSidebar({
   const handleApplyModification = useCallback(
     (modification: ScenarioModification, messageId: string) => {
       const meta = responseMetadataRef.current[messageId];
+      const appliedKey = messageId; // For single modifications, the key is the messageId
 
       // Check if this is actually a fixture lock proposal
       const pendingLock = pendingLocksRef.current[messageId];
@@ -189,7 +225,8 @@ export default function ChatSidebar({
           mode,
         };
         onAddChapter(chapter);
-        setAppliedMessageIds((prev) => new Set(prev).add(messageId));
+        setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
+        appliedChapterMapRef.current[appliedKey] = chapter.id;
         setMessages((prev) => [
           ...prev,
           {
@@ -217,7 +254,8 @@ export default function ChatSidebar({
       };
 
       onAddChapter(chapter);
-      setAppliedMessageIds((prev) => new Set(prev).add(messageId));
+      setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
+      appliedChapterMapRef.current[appliedKey] = chapter.id;
 
       const sysMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -232,14 +270,26 @@ export default function ChatSidebar({
   );
 
   const handleApplyOption = useCallback(
-    (option: ProposedOption, messageId: string) => {
-      // Find which index this option is so we can track it
-      const msg = messages.find((m) => m.id === messageId);
-      const optIndex = msg?.proposedOptions?.indexOf(option) ?? 0;
-      const appliedKey = `${messageId}-opt-${optIndex}`;
+    (option: ProposedOption, messageId: string, optionIndex: number = 0) => {
+      const appliedKey = `${messageId}-opt-${optionIndex}`;
 
-      if (option.type === 'fixture_lock' && option.fixtureLock) {
-        const chapter: Chapter = {
+      let chapter: Chapter | null = null;
+
+      if (option.type === 'compound') {
+        chapter = {
+          id: crypto.randomUUID(),
+          title: option.title,
+          type: 'compound',
+          status: 'active',
+          createdAt: Date.now(),
+          teamFixtureLocks: option.teamFixtureLocks,
+          modification: option.modification,
+          confidence: option.confidence ?? 'medium',
+          reasoning: option.reasoning,
+          mode,
+        };
+      } else if (option.type === 'fixture_lock' && option.fixtureLock) {
+        chapter = {
           id: crypto.randomUUID(),
           title: option.title,
           type: 'fixture_lock',
@@ -250,23 +300,8 @@ export default function ChatSidebar({
           reasoning: option.reasoning,
           mode,
         };
-        onAddChapter(chapter);
-        setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: 'system' as const,
-            content: `Chapter created: "${chapter.title}"`,
-            timestamp: Date.now(),
-            chapterId: chapter.id,
-          },
-        ]);
-        return;
-      }
-
-      if (option.modification) {
-        const chapter: Chapter = {
+      } else if (option.modification) {
+        chapter = {
           id: crypto.randomUUID(),
           title: option.title,
           type: 'probability_modifier',
@@ -277,21 +312,45 @@ export default function ChatSidebar({
           reasoning: option.reasoning,
           mode,
         };
+      }
+
+      if (chapter) {
         onAddChapter(chapter);
         setAppliedMessageIds((prev) => new Set(prev).add(appliedKey));
+        appliedChapterMapRef.current[appliedKey] = chapter.id;
         setMessages((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
             role: 'system' as const,
-            content: `Chapter created: "${chapter.title}"`,
+            content: `Chapter created: "${chapter!.title}"`,
             timestamp: Date.now(),
-            chapterId: chapter.id,
+            chapterId: chapter!.id,
           },
         ]);
       }
     },
-    [onAddChapter, mode, messages]
+    [onAddChapter, mode]
+  );
+
+  const handleUnapply = useCallback(
+    (appliedKey: string) => {
+      const chapterId = appliedChapterMapRef.current[appliedKey];
+      if (chapterId) {
+        onRemoveChapter(chapterId);
+        delete appliedChapterMapRef.current[appliedKey];
+      }
+      setAppliedMessageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(appliedKey);
+        return next;
+      });
+      // Remove the system message for this chapter
+      if (chapterId) {
+        setMessages((prev) => prev.filter((m) => m.chapterId !== chapterId));
+      }
+    },
+    [onRemoveChapter]
   );
 
   if (!isOpen) return null;
@@ -371,6 +430,7 @@ export default function ChatSidebar({
           accentColor={accentColor}
           onApplyModification={handleApplyModification}
           onApplyOption={handleApplyOption}
+          onUnapply={handleUnapply}
           appliedMessageIds={appliedMessageIds}
         />
 

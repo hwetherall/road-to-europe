@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Team, Fixture } from '@/lib/types';
-import { WhatIfAnalysis } from './types';
+import { WhatIfAnalysis, WHAT_IF_ANALYSIS_VERSION } from './types';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -48,6 +48,7 @@ export function createWhatIfScenarioKey(input: {
     }));
 
   const blob = JSON.stringify({
+    version: WHAT_IF_ANALYSIS_VERSION,
     target: `${input.targetTeam}:${input.targetMetric}`,
     teams: normalizedTeams,
     fixtures: normalizedFixtures,
@@ -62,6 +63,10 @@ export interface CachedWhatIfRecord {
   analysis: WhatIfAnalysis;
   generatedAt: number;
   cacheMatchType: 'exact' | 'fallback';
+}
+
+function isCurrentAnalysisVersion(value: unknown): value is WhatIfAnalysis {
+  return !!value && typeof value === 'object' && (value as WhatIfAnalysis).version === WHAT_IF_ANALYSIS_VERSION;
 }
 
 export async function getCachedWhatIfAnalysis(params: {
@@ -81,7 +86,7 @@ export async function getCachedWhatIfAnalysis(params: {
       .limit(1)
       .single();
 
-    if (exact) {
+    if (exact && isCurrentAnalysisVersion(exact.analysis_json)) {
       return {
         analysis: exact.analysis_json as WhatIfAnalysis,
         generatedAt: new Date(exact.updated_at).getTime(),
@@ -99,7 +104,7 @@ export async function getCachedWhatIfAnalysis(params: {
       .limit(1)
       .single();
 
-    if (fallback) {
+    if (fallback && isCurrentAnalysisVersion(fallback.analysis_json)) {
       return {
         analysis: fallback.analysis_json as WhatIfAnalysis,
         generatedAt: new Date(fallback.updated_at).getTime(),

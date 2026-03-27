@@ -1,10 +1,10 @@
 import { OpenRouterTool } from '@/lib/openrouter';
 import { Team, Fixture, SimulationResult } from '@/lib/types';
-import { simulateFull } from '@/lib/server-simulation';
-import { executeWebSearch } from '@/lib/web-search';
-import { lookupPlayer, getPlayersForClub } from './fifa-data';
-import { computeSquadProfile, computeSquadProfileFromPlayers, rankSquad, computeAllSquadProfiles } from './squad-quality';
-import { CounterfactualScenario } from './types';
+import { simulateFullSeason, TeamModification } from './full-season-sim';
+import { executeWebSearchDetailed } from '@/lib/web-search';
+import { lookupPlayer } from './fifa-data';
+import { computeSquadProfileFromPlayers, computeAllSquadProfiles } from './squad-quality';
+import { CounterfactualScenario, WhatIfSearchTraceEntry } from './types';
 
 // ── Tool Definitions (OpenAI function-calling format) ──
 
@@ -14,7 +14,7 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
     function: {
       name: 'run_simulation',
       description:
-        'Run a Monte Carlo simulation with modified probabilities. Provide team-level probability deltas (e.g. increase a team\'s home win probability by 0.08 across all their fixtures). Can also lock specific fixtures. Returns the target metric probability and position distribution. Use this to TEST every hypothesis with real numbers.',
+        'Run a FULL-SEASON Monte Carlo simulation (all 380 fixtures from scratch) with modified probabilities. Modifications apply to EVERY match in the season, not just remaining games. Teams start at 0 points — current standings are ignored. Returns the target metric probability, expected points, and baseline comparison.',
       parameters: {
         type: 'object',
         properties: {
@@ -30,19 +30,7 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
               },
               required: ['teamAbbr', 'homeWinDelta', 'awayWinDelta', 'drawDelta'],
             },
-            description: 'Probability modifications per team',
-          },
-          fixtureLocks: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                fixtureId: { type: 'string' },
-                result: { type: 'string', enum: ['home', 'draw', 'away'] },
-              },
-              required: ['fixtureId', 'result'],
-            },
-            description: 'Lock specific fixtures to a result',
+            description: 'Probability modifications per team (applied across ALL 380 fixtures)',
           },
           simCount: { type: 'number', description: 'Number of simulations (default 10000)' },
         },
@@ -92,7 +80,7 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
     function: {
       name: 'web_search',
       description:
-        'Search the web for current football information. Use for: verifying transfers and fees, checking player availability, finding tactical analysis, checking fixture congestion. ALWAYS verify football facts via search.',
+        'Search the web for current football information. Use for: verifying transfers and fees, checking player availability, finding tactical analysis, checking fixture congestion. ALWAYS include "2025-26" in queries about teams. ALWAYS verify football facts via search.',
       parameters: {
         type: 'object',
         properties: {
@@ -173,6 +161,8 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
               baselineOdds: { type: 'number' },
               modifiedOdds: { type: 'number' },
               delta: { type: 'number' },
+              expectedPoints: { type: 'number', description: 'Modified expected points from the simulation' },
+              expectedPosition: { type: 'number', description: 'Modified expected position from the simulation' },
             },
             required: ['targetMetric', 'baselineOdds', 'modifiedOdds', 'delta'],
           },
@@ -194,70 +184,10 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
 
 // ── Tool Executors ──
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function applyModifications(
-  fixtures: Fixture[],
-  modifications: Array<{ teamAbbr: string; homeWinDelta: number; awayWinDelta: number; drawDelta: number }>,
-  fixtureLocks?: Array<{ fixtureId: string; result: string }>
-): Fixture[] {
-  let modified = fixtures.map((f) => ({ ...f }));
-
-  // Apply fixture locks first
-  if (fixtureLocks) {
-    for (const lock of fixtureLocks) {
-      modified = modified.map((f) => {
-        if (f.id !== lock.fixtureId) return f;
-        return {
-          ...f,
-          homeWinProb: lock.result === 'home' ? 1.0 : 0.0,
-          drawProb: lock.result === 'draw' ? 1.0 : 0.0,
-          awayWinProb: lock.result === 'away' ? 1.0 : 0.0,
-        };
-      });
-    }
-  }
-
-  // Apply probability deltas
-  for (const mod of modifications) {
-    modified = modified.map((f) => {
-      if (f.status !== 'SCHEDULED') return f;
-      // Skip locked fixtures
-      if (fixtureLocks?.some((l) => l.fixtureId === f.id)) return f;
-
-      const isHome = f.homeTeam === mod.teamAbbr;
-      const isAway = f.awayTeam === mod.teamAbbr;
-      if (!isHome && !isAway) return f;
-
-      let hDelta = 0, dDelta = 0, aDelta = 0;
-
-      if (isHome) {
-        hDelta = mod.homeWinDelta;
-        dDelta = mod.drawDelta;
-        aDelta = -(hDelta + dDelta);
-      } else {
-        aDelta = mod.awayWinDelta;
-        dDelta = mod.drawDelta;
-        hDelta = -(aDelta + dDelta);
-      }
-
-      const newHome = clamp((f.homeWinProb ?? 0.4) + hDelta, 0.01, 0.98);
-      const newDraw = clamp((f.drawProb ?? 0.25) + dDelta, 0.01, 0.98);
-      const newAway = clamp((f.awayWinProb ?? 0.35) + aDelta, 0.01, 0.98);
-
-      const total = newHome + newDraw + newAway;
-      return {
-        ...f,
-        homeWinProb: newHome / total,
-        drawProb: newDraw / total,
-        awayWinProb: newAway / total,
-      };
-    });
-  }
-
-  return modified;
+export interface FullSeasonBaseline {
+  targetMetricPct: number;
+  expectedPoints: number;
+  expectedPosition: number;
 }
 
 export function createToolExecutors(
@@ -265,40 +195,75 @@ export function createToolExecutors(
   fixtures: Fixture[],
   targetTeam: string,
   targetMetric: keyof SimulationResult,
-  scenarioAccumulator: CounterfactualScenario[]
+  scenarioAccumulator: CounterfactualScenario[],
+  baselineFullSeason?: FullSeasonBaseline,
+  searchTrail?: WhatIfSearchTraceEntry[],
+  phase?: WhatIfSearchTraceEntry['phase']
 ): Record<string, (args: Record<string, unknown>) => Promise<unknown>> {
   let simulationCount = 0;
 
   return {
     async run_simulation(args) {
-      const modifications = (args.modifications as Array<{
+      const modifications = ((args.modifications as Array<{
         teamAbbr: string;
         homeWinDelta: number;
         awayWinDelta: number;
         drawDelta: number;
-      }>) ?? [];
-      const fixtureLocks = args.fixtureLocks as Array<{ fixtureId: string; result: string }> | undefined;
+      }>) ?? []).map(m => ({
+        teamAbbr: m.teamAbbr,
+        homeWinDelta: m.homeWinDelta,
+        awayWinDelta: m.awayWinDelta,
+        drawDelta: m.drawDelta,
+      } satisfies TeamModification));
+
       const simCount = (args.simCount as number) ?? 10000;
 
-      const modifiedFixtures = applyModifications(fixtures, modifications, fixtureLocks);
-      const results = simulateFull(teams, modifiedFixtures, simCount);
+      // Run full-season simulation
+      const results = simulateFullSeason({
+        teams,
+        fixtures,
+        modifications,
+        numSims: simCount,
+      });
       simulationCount++;
 
       const targetResult = results.find((r) => r.team === targetTeam);
       const metricValue = targetResult ? (targetResult[targetMetric] as number) : 0;
 
-      // Return a useful summary
+      // Use cached baseline if available, otherwise compute
+      let baselinePct = baselineFullSeason?.targetMetricPct ?? 0;
+      let baselineExpPoints = baselineFullSeason?.expectedPoints ?? 0;
+      let baselineExpPos = baselineFullSeason?.expectedPosition ?? 0;
+
+      if (!baselineFullSeason) {
+        const baselineResults = simulateFullSeason({
+          teams,
+          fixtures,
+          modifications: [],
+          numSims: 10000,
+        });
+        const baselineTarget = baselineResults.find((r) => r.team === targetTeam);
+        baselinePct = baselineTarget ? (baselineTarget[targetMetric] as number) : 0;
+        baselineExpPoints = baselineTarget?.avgPoints ?? 0;
+        baselineExpPos = baselineTarget?.avgPosition ?? 0;
+      }
+
       return {
         targetTeam,
         targetMetric,
         targetMetricPct: +metricValue.toFixed(2),
+        baselinePct: +baselinePct.toFixed(2),
+        delta: +(metricValue - baselinePct).toFixed(2),
         expectedPoints: targetResult ? +targetResult.avgPoints.toFixed(1) : 0,
         expectedPosition: targetResult ? +targetResult.avgPosition.toFixed(1) : 0,
+        baselineExpectedPoints: +baselineExpPoints.toFixed(1),
+        baselineExpectedPosition: +baselineExpPos.toFixed(1),
         top4Pct: targetResult ? +targetResult.top4Pct.toFixed(2) : 0,
         top7Pct: targetResult ? +targetResult.top7Pct.toFixed(2) : 0,
         championPct: targetResult ? +((targetResult as unknown as Record<string, number>).championPct ?? 0).toFixed(2) : 0,
         simulationsRun: simCount,
         totalSimulationsThisSession: simulationCount,
+        note: 'Full-season simulation: all 380 fixtures from scratch using Elo. Teams start at 0 points.',
       };
     },
 
@@ -363,11 +328,33 @@ export function createToolExecutors(
     },
 
     async web_search(args) {
-      const query = args.query as string;
+      let query = args.query as string;
+
+      // Fix 2: Auto-append "2025-26" to queries that mention PL teams but no season
+      const teamNames = teams.map(t => t.name.toLowerCase());
+      const teamAbbrs = teams.map(t => t.abbr.toLowerCase());
+      const mentionsTeam = teamNames.some(n => query.toLowerCase().includes(n)) ||
+                           teamAbbrs.some(a => query.toLowerCase().includes(a));
+      const hasSeason = /20\d\d[-\/]\d\d/.test(query) || /20\d\d/.test(query);
+
+      if (mentionsTeam && !hasSeason) {
+        query = `${query} 2025-26`;
+      }
+
       try {
-        const results = await executeWebSearch(query);
+        const execution = await executeWebSearchDetailed(query);
+        if (searchTrail && phase) {
+          searchTrail.push({
+            phase,
+            query: execution.query,
+            provider: execution.provider,
+            resultCount: execution.resultCount,
+          });
+        }
         // Truncate to avoid bloating conversation
-        return results.length > 1500 ? results.slice(0, 1500) + '...' : results;
+        return execution.summary.length > 1500
+          ? execution.summary.slice(0, 1500) + '...'
+          : execution.summary;
       } catch (e) {
         return `Search failed: ${e instanceof Error ? e.message : 'Unknown error'}`;
       }
@@ -397,7 +384,15 @@ export function createToolExecutors(
           awayWinDelta: m.awayWinDelta as number,
           drawDelta: m.drawDelta as number,
         })),
-        simulationResult: args.simulationResult as CounterfactualScenario['simulationResult'],
+        fixtureLocks: ((args.fixtureLocks as Array<Record<string, unknown>>) ?? []).map((lock) => ({
+          fixtureId: lock.fixtureId as string,
+          result: lock.result as 'home' | 'draw' | 'away',
+        })),
+        simulationResult: {
+          ...(args.simulationResult as CounterfactualScenario['simulationResult']),
+          modifiedExpectedPoints: (args.simulationResult as Record<string, unknown>).expectedPoints as number | undefined,
+          modifiedExpectedPosition: (args.simulationResult as Record<string, unknown>).expectedPosition as number | undefined,
+        },
         plausibility: args.plausibility as CounterfactualScenario['plausibility'],
         iteration: scenarioAccumulator.length + 1,
       };

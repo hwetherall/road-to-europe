@@ -38,12 +38,14 @@ export async function callOpenRouter(
     model?: string;
     tools?: OpenRouterTool[];
     maxTokens?: number;
+    plugins?: Array<{ id: string; max_results?: number }>;
   } = {}
 ): Promise<OpenRouterMessage> {
   const {
     model = 'anthropic/claude-opus-4.6',
     tools,
-    maxTokens = 4000,
+    maxTokens = 400000,
+    plugins,
   } = options;
 
   const body: Record<string, unknown> = {
@@ -52,6 +54,7 @@ export async function callOpenRouter(
     max_tokens: maxTokens,
   };
   if (tools && tools.length > 0) body.tools = tools;
+  if (plugins && plugins.length > 0) body.plugins = plugins;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',

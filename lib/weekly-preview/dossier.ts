@@ -124,7 +124,7 @@ function tableStoryScore(teams: Team[], fixture: Fixture): number {
   const awayEurope = awayPos >= 4 && awayPos <= 11;
 
   let score = 35;
-  if (fixture.homeTeam === 'NEW' || fixture.awayTeam === 'NEW') score += 65;
+  if (fixture.homeTeam === 'NEW' || fixture.awayTeam === 'NEW') score += 20;
   if (homeTitle && awayTitle) score += 40;
   if (homeBottom && awayBottom) score += 35;
   if (homeEurope && awayEurope) score += 30;
@@ -307,6 +307,7 @@ export async function buildWeeklyPreviewDossier(
 ): Promise<WeeklyPreviewDossier> {
   const liveSnapshot = snapshot ?? (await getLiveSnapshot());
   const { nextMatchday, fixtures: nextRoundFixtures } = getNextRoundFixtures(liveSnapshot.fixtures);
+  const roundsRemaining = nextMatchday ? 38 - nextMatchday + 1 : 0;
   const sortedTeams = sortStandings(liveSnapshot.teams);
   const dataHash = createHash('sha256')
     .update(
@@ -346,6 +347,9 @@ export async function buildWeeklyPreviewDossier(
     baselineResults,
     seedBase,
   });
+  const perfectWeekendCumulativeDeltaPp = Number(
+    perfectWeekend.reduce((sum, entry) => sum + entry.deltaPp, 0).toFixed(2)
+  );
 
   const leader = sortedTeams[0];
   const leaderResult = baselineResults.find((result) => result.team === leader.abbr) ?? baselineResults[0];
@@ -405,8 +409,10 @@ export async function buildWeeklyPreviewDossier(
   };
 
   const allowedNumericClaimsBySection: Record<WeeklyPreviewSectionId, WeeklyPreviewNumericClaim[]> = {
+    // Overview establishes the baseline — the only section that should state it as a headline number
     overview: [europeClaims[0]],
-    'three-contests': [...titleClaims, ...europeClaims, ...survivalClaims],
+    // Three-contests gets contest-specific stats but NOT the Newcastle baseline (already in overview)
+    'three-contests': [...titleClaims, europeClaims[1], ...survivalClaims],
     'hot-news': research.hotNewsCandidates.map((item, index) =>
       buildAllowedClaim(
         `hot-news-impact-${index + 1}`,
@@ -416,15 +422,15 @@ export async function buildWeeklyPreviewDossier(
         `hotNewsCandidates[${index}]`
       )
     ),
+    // GOTW gets the leverage spread only — no baseline restatement
     'game-of-the-week': shortlist[0]
       ? [
-          buildAllowedClaim('gotw-baseline', 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
           buildAllowedClaim('gotw-spread', 'Game-of-the-week leverage spread', shortlist[0].leverageSpreadPp, 'pp', 'gameOfWeekShortlist[0].leverageSpreadPp'),
         ]
       : [],
-    'club-focus': [
-      buildAllowedClaim('club-focus-top7', 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
-    ],
+    // Club-focus: no numeric claims — analysis is qualitative, not restating numbers
+    'club-focus': [],
+    // Match-focus gets only the own-result delta
     'match-focus': selectedClubFixture
       ? (() => {
           const entry = perfectWeekend.find((item) => item.fixtureId === selectedClubFixture.id);
@@ -435,11 +441,16 @@ export async function buildWeeklyPreviewDossier(
             : [];
         })()
       : [],
-    'perfect-weekend': perfectWeekend.flatMap((entry, index) => [
-      buildAllowedClaim(`perfect-baseline-${index + 1}`, 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
-      buildAllowedClaim(`perfect-delta-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam}`, entry.deltaPp, 'pp', `perfectWeekend[${index}].deltaPp`),
-    ]),
-    summary: [europeClaims[0]],
+    // Perfect-weekend needs the baseline once (for table context) plus all deltas and cumulative
+    'perfect-weekend': [
+      buildAllowedClaim('perfect-baseline', 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
+      ...perfectWeekend.map((entry, index) =>
+        buildAllowedClaim(`perfect-delta-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam}`, entry.deltaPp, 'pp', `perfectWeekend[${index}].deltaPp`)
+      ),
+      buildAllowedClaim('perfect-cumulative', 'Perfect weekend cumulative delta', perfectWeekendCumulativeDeltaPp, 'pp', 'perfectWeekendCumulativeDeltaPp'),
+    ],
+    // Summary: no numeric claims — synthesis only, no restating numbers
+    summary: [],
   };
 
   const warnings = [
@@ -476,7 +487,9 @@ export async function buildWeeklyPreviewDossier(
       selectedClub: selectedProfile,
       opponent: opponentProfile,
     },
+    roundsRemaining,
     perfectWeekend,
+    perfectWeekendCumulativeDeltaPp,
     approvedStorylines: research.approvedStorylines,
     warnings,
     sources: research.sources,

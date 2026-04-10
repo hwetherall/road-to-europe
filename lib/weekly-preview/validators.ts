@@ -8,6 +8,10 @@ function extractPercentTokens(markdown: string): string[] {
   return markdown.match(/[+-]?\d+(?:\.\d+)?(?:%|pp)/g) ?? [];
 }
 
+function extractSourceRefLeaks(markdown: string): string[] {
+  return markdown.match(/\[research-\d+\]/g) ?? [];
+}
+
 export function validatePerfectWeekend(dossier: WeeklyPreviewDossier): void {
   const fixtureIds = new Set(dossier.nextRoundFixtures.map((fixture) => fixture.id));
   if (dossier.perfectWeekend.length !== fixtureIds.size) {
@@ -60,6 +64,13 @@ export function validateSections(
       if (!allowedTokens.has(token)) {
         throw new Error(`Section ${section.sectionId} contains undeclared numeric token ${token}.`);
       }
+    }
+
+    const sourceLeaks = extractSourceRefLeaks(section.markdown);
+    if (sourceLeaks.length > 0) {
+      throw new Error(
+        `Section ${section.sectionId} contains source reference IDs in markdown text (${sourceLeaks.join(', ')}). These belong only in the sourceRefs JSON array, not in reader-facing text.`
+      );
     }
   });
 

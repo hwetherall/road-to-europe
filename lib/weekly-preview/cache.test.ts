@@ -39,6 +39,7 @@ describe('weekly preview cache', () => {
         llmCalls: 0,
         sectionAgentCalls: 8,
         editorCalls: 1,
+        factCheckCorrections: 0,
         model: 'model',
       },
     });

@@ -58,21 +58,20 @@ export async function buildResearchBundle(input: {
 
   const hotNewsCandidates: WeeklyPreviewHotNewsItem[] = searches
     .slice(0, 3)
-    .map((search, index) => ({
-      title:
-        index === 0
-          ? 'Injuries and availability are shaping the weekend'
-          : index === 1
-            ? 'Managerial noise could turn into tactical change'
-            : 'Off-pitch stories are close enough to affect selection',
+    .map((search, originalIndex) => ({ search, originalIndex }))
+    .filter(({ search, originalIndex }) =>
+      // Always keep the first item so hot-news has at least one source ref
+      originalIndex === 0 || (search.resultCount > 0 && search.summary.trim().length > 40)
+    )
+    .map(({ search, originalIndex }) => ({
+      title: clip(search.summary, 120),
       summary: clip(search.summary),
       uncertaintyNote:
-        search.resultCount === 0 ? 'Search coverage was thin; treat this as provisional.' : undefined,
+        search.resultCount <= 2 ? 'Limited search coverage; treat details as provisional.' : undefined,
       relevantTeams:
-        index === 2 && input.opponentName ? [input.selectedClubName, input.opponentName] : [input.selectedClubName],
-      sourceRefIds: [sources[index].id],
-    }))
-    .slice(0, 3);
+        originalIndex >= 2 && input.opponentName ? [input.selectedClubName, input.opponentName] : [input.selectedClubName],
+      sourceRefIds: [sources[originalIndex].id],
+    }));
 
   const selectedProfile = await computeSquadProfile('NEW');
   const opponentAbbr = input.selectedClubFixture

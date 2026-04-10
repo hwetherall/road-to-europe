@@ -662,7 +662,7 @@ export async function POST(req: NextRequest) {
 
             let message: OpenRouterMessage;
             try {
-              message = await callOpenRouter(conversation, { model, tools: TOOLS, maxTokens: 1500 });
+              message = await callOpenRouter(conversation, { model, tools: TOOLS, maxTokens: 15000 });
             } catch {
               send({
                 type: 'error',
@@ -826,7 +826,7 @@ export async function POST(req: NextRequest) {
             content: 'Please provide your best estimate based on the research so far.',
           });
 
-          const finalMessage = await callOpenRouter(conversation, { model, maxTokens: 1500 });
+          const finalMessage = await callOpenRouter(conversation, { model, maxTokens: 15000 });
           const parsed = parseAgentResponse(finalMessage.content ?? '', toolCallLog);
           send({ type: 'final', data: parsed as unknown as Record<string, unknown> });
           closeSafe();

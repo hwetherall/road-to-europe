@@ -408,7 +408,7 @@ max_tokens: 4000,
 async function callOpenRouter(
   messages: OpenRouterMessage[],
   tools?: typeof TOOLS,
-  maxTokens: number = 4000  // default stays 4000 for research phase
+  maxTokens: number = 400000  // default stays 4000 for research phase
 ): Promise<OpenRouterMessage> {
   const body: Record<string, unknown> = {
     model: 'anthropic/claude-opus-4.6',

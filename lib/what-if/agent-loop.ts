@@ -36,7 +36,7 @@ export async function agentLoop(config: AgentLoopConfig): Promise<AgentLoopResul
     tools,
     toolExecutors,
     maxRounds = 20,
-    maxTokens = 4000,
+    maxTokens = 400000,
     model,
     onToolCall,
   } = config;

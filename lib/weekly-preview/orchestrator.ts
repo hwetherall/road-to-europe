@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { callOpenRouter } from '@/lib/openrouter';
 import { buildWeeklyPreviewDossier } from '@/lib/weekly-preview/dossier';
 import { upsertWeeklyPreviewDraft } from '@/lib/weekly-preview/cache';
-import { buildFinalEditorPrompt, buildSectionSystemPrompt, buildSectionUserPrompt } from '@/lib/weekly-preview/prompts';
+import { buildFactCheckPrompt, buildFinalEditorPrompt, buildSectionSystemPrompt, buildSectionUserPrompt } from '@/lib/weekly-preview/prompts';
 import { validatePerfectWeekend, validateSections, validateSingleSection } from '@/lib/weekly-preview/validators';
 import {
   WEEKLY_PREVIEW_SECTION_ORDER,
@@ -12,7 +12,16 @@ import {
   WeeklyPreviewSectionId,
 } from '@/lib/weekly-preview/types';
 
-const DEFAULT_MODEL = 'anthropic/claude-opus-4.6';
+const SECTION_MODEL = 'anthropic/claude-sonnet-4-6';
+const EDITOR_MODEL = 'anthropic/claude-sonnet-4-6';
+const FACT_CHECK_MODEL = 'google/gemini-3.1-flash-lite-preview';
+
+interface FactCheckCorrection {
+  claim: string;
+  correction: string;
+  sectionId: string;
+  severity: 'high' | 'medium';
+}
 
 function parseSection(content: string): WeeklyPreviewSectionArtifact {
   const cleaned = content.trim();
@@ -59,8 +68,8 @@ async function runSectionAgent(
         },
       ],
       {
-        model: DEFAULT_MODEL,
-        maxTokens: 2200,
+        model: SECTION_MODEL,
+        maxTokens: 22000,
       }
     );
 
@@ -124,14 +133,47 @@ export async function generateWeeklyPreviewDraft(input?: {
     return section;
   });
 
+  // Fact-check pass: fast, cheap model with current knowledge
+  let factCheckCorrections: FactCheckCorrection[] = [];
+  try {
+    const factCheckMessage = await callOpenRouter(
+      [
+        { role: 'system', content: 'You are a Premier League fact-checker. Output strict JSON only. Search the web to verify every claim before flagging it.' },
+        { role: 'user', content: buildFactCheckPrompt(orderedSections) },
+      ],
+      {
+        model: FACT_CHECK_MODEL,
+        maxTokens: 15000,
+        plugins: [{ id: 'web', max_results: 5 }],
+      }
+    );
+    llmCalls++;
+
+    const parsed = parseJsonPayload<{ corrections?: FactCheckCorrection[] }>(
+      factCheckMessage.content ?? '{}'
+    );
+    factCheckCorrections = parsed.corrections ?? [];
+    if (factCheckCorrections.length > 0) {
+      console.log(
+        `[weekly-preview] fact-checker found ${factCheckCorrections.length} correction(s):`,
+        factCheckCorrections.map((c) => `${c.sectionId}: ${c.claim} -> ${c.correction}`)
+      );
+    }
+  } catch (error) {
+    console.warn(
+      '[weekly-preview] fact-check pass failed, continuing without corrections:',
+      error instanceof Error ? error.message : error
+    );
+  }
+
   const editorMessage = await callOpenRouter(
     [
-      { role: 'system', content: 'You are a precise JSON-only editor.' },
-      { role: 'user', content: buildFinalEditorPrompt({ dossier, sections: orderedSections }) },
+      { role: 'system', content: 'You are a precise JSON-only editor. Output strict JSON only.' },
+      { role: 'user', content: buildFinalEditorPrompt({ dossier, sections: orderedSections, factCheckCorrections }) },
     ],
     {
-      model: DEFAULT_MODEL,
-      maxTokens: 3200,
+      model: EDITOR_MODEL,
+      maxTokens: 560000,
     }
   );
   llmCalls++;
@@ -141,12 +183,16 @@ export async function generateWeeklyPreviewDraft(input?: {
     const editorPayload = parseJsonPayload<{
       sections?: WeeklyPreviewSectionArtifact[];
     }>(editorMessage.content ?? '{}');
-    finalSections = editorPayload.sections ?? orderedSections;
+    const editorSections = editorPayload.sections ?? orderedSections;
+    // Validate the editor output before accepting it
+    validateSections(dossier, editorSections);
+    finalSections = editorSections;
   } catch (error) {
     console.warn(
-      '[weekly-preview] final editor parse failed, falling back to section-agent output:',
+      '[weekly-preview] editor output failed validation, falling back to section-agent output:',
       error instanceof Error ? error.message : error
     );
+    // Fall back to pre-editor sections which already passed per-section validation
   }
   validateSections(dossier, finalSections);
 
@@ -168,7 +214,8 @@ export async function generateWeeklyPreviewDraft(input?: {
       llmCalls,
       sectionAgentCalls: 8,
       editorCalls: 1,
-      model: DEFAULT_MODEL,
+      factCheckCorrections: factCheckCorrections.length,
+      model: `sections=${SECTION_MODEL}, factCheck=${FACT_CHECK_MODEL}, editor=${EDITOR_MODEL}`,
     },
   };
 

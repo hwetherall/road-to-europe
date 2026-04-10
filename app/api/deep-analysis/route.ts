@@ -637,7 +637,7 @@ async function runWritingPhase(
     { role: 'user', content: `Write the Deep Analysis JSON for ${teamName}. Use ONLY facts from the fact sheet. Do not invent any names or claims.` },
   ];
 
-  const message = await callOpenRouter(conversation, { maxTokens: 8000 });
+  const message = await callOpenRouter(conversation, { maxTokens: 80000 });
   const content = message.content ?? '';
 
   // Parse JSON
@@ -696,7 +696,7 @@ async function runWritingPhase(
       content: `Your analysis contains factual errors that contradict the league standings. Fix ONLY these specific errors and return the complete corrected JSON. Do not change anything else.\n\n${correctionList}\n\nReturn the corrected full JSON wrapped in \`\`\`json blocks.`,
     });
 
-    const correctedMessage = await callOpenRouter(conversation, { maxTokens: 8000 });
+    const correctedMessage = await callOpenRouter(conversation, { maxTokens: 80000 });
     const correctedContent = correctedMessage.content ?? '';
 
     const correctedMatch = correctedContent.match(/```json\s*([\s\S]*?)\s*```/);

@@ -115,7 +115,9 @@ export interface WeeklyPreviewDossier {
     selectedClub: SquadProfile;
     opponent: SquadProfile | null;
   };
+  roundsRemaining: number;
   perfectWeekend: WeeklyPreviewPerfectWeekendEntry[];
+  perfectWeekendCumulativeDeltaPp: number;
   approvedStorylines: string[];
   warnings: string[];
   sources: WeeklyPreviewSourceRef[];
@@ -155,6 +157,7 @@ export interface WeeklyPreviewDraft {
     llmCalls: number;
     sectionAgentCalls: number;
     editorCalls: number;
+    factCheckCorrections: number;
     model: string;
   };
 }

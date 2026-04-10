@@ -276,7 +276,7 @@ export async function POST(req: NextRequest) {
         tools: diagnosisTools,
         toolExecutors: executors,
         maxRounds: 8,
-        maxTokens: 4000,
+        maxTokens: 40000,
       });
 
       const parsed = extractJSON(result.finalContent);
@@ -383,7 +383,7 @@ export async function POST(req: NextRequest) {
         tools: WHAT_IF_TOOLS,
         toolExecutors: executors,
         maxRounds: 40,
-        maxTokens: 4000,
+        maxTokens: 40000,
       });
 
       return NextResponse.json({
@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
         tools: stressTestTools,
         toolExecutors: executors,
         maxRounds: 15,
-        maxTokens: 4000,
+        maxTokens: 40000,
       });
 
       return NextResponse.json({
@@ -567,7 +567,7 @@ export async function POST(req: NextRequest) {
           { role: 'system', content: prompt.system },
           { role: 'user', content: prompt.user },
         ],
-        { maxTokens: 6000 }
+        { maxTokens: 60000 }
       );
 
       const combinedStats: PhaseStats = {

@@ -76,3 +76,93 @@ export function validateSections(
     }
   }
 }
+
+export function validateSingleSection(
+  dossier: WeeklyPreviewDossier,
+  section: WeeklyPreviewSectionArtifact
+): void {
+  validateSections(dossier, [
+    {
+      sectionId: 'overview',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: [],
+      handoffNotes: [],
+    },
+    {
+      sectionId: 'three-contests',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: ['placeholder'],
+      handoffNotes: [],
+    },
+    {
+      sectionId: 'hot-news',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: ['placeholder'],
+      handoffNotes: [],
+      meta: { itemCount: 0 },
+    },
+    {
+      sectionId: 'game-of-the-week',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: ['placeholder'],
+      handoffNotes: [],
+    },
+    {
+      sectionId: 'club-focus',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: ['placeholder'],
+      handoffNotes: [],
+    },
+    {
+      sectionId: 'match-focus',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: ['placeholder'],
+      handoffNotes: [],
+    },
+    {
+      sectionId: 'perfect-weekend',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: [],
+      handoffNotes: [],
+      meta: { fixtureCount: 0 },
+    },
+    {
+      sectionId: 'summary',
+      headline: 'placeholder',
+      markdown: '',
+      factsUsed: [],
+      newFacts: [],
+      numericClaimIds: [],
+      sourceRefs: [],
+      handoffNotes: [],
+    },
+  ].map((entry) => (entry.sectionId === section.sectionId ? section : entry)));
+}

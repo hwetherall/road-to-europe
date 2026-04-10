@@ -58,8 +58,9 @@ export function buildSectionUserPrompt(input: {
   dossier: WeeklyPreviewDossier;
   sectionId: WeeklyPreviewSectionId;
   previousSections: WeeklyPreviewSectionArtifact[];
+  retryNote?: string;
 }): string {
-  const { dossier, sectionId, previousSections } = input;
+  const { dossier, sectionId, previousSections, retryNote } = input;
 
   return `Section order:
 ${WEEKLY_PREVIEW_SECTION_ORDER.join(' -> ')}
@@ -115,6 +116,7 @@ Return JSON in this shape:
 
 Additional section instructions:
 ${sectionSpecificInstructions(sectionId)}
+${retryNote ? `\n\nRetry correction:\n${retryNote}` : ''}
 `;
 }
 

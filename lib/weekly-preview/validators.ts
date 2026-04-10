@@ -81,7 +81,7 @@ export function validateSingleSection(
   dossier: WeeklyPreviewDossier,
   section: WeeklyPreviewSectionArtifact
 ): void {
-  validateSections(dossier, [
+  const placeholders: WeeklyPreviewSectionArtifact[] = [
     {
       sectionId: 'overview',
       headline: 'placeholder',
@@ -91,6 +91,7 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: [],
       handoffNotes: [],
+      meta: {},
     },
     {
       sectionId: 'three-contests',
@@ -101,6 +102,7 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: ['placeholder'],
       handoffNotes: [],
+      meta: {},
     },
     {
       sectionId: 'hot-news',
@@ -122,6 +124,7 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: ['placeholder'],
       handoffNotes: [],
+      meta: {},
     },
     {
       sectionId: 'club-focus',
@@ -132,6 +135,7 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: ['placeholder'],
       handoffNotes: [],
+      meta: {},
     },
     {
       sectionId: 'match-focus',
@@ -142,6 +146,7 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: ['placeholder'],
       handoffNotes: [],
+      meta: {},
     },
     {
       sectionId: 'perfect-weekend',
@@ -163,6 +168,12 @@ export function validateSingleSection(
       numericClaimIds: [],
       sourceRefs: [],
       handoffNotes: [],
+      meta: {},
     },
-  ].map((entry) => (entry.sectionId === section.sectionId ? section : entry)));
+  ];
+
+  validateSections(
+    dossier,
+    placeholders.map((entry) => (entry.sectionId === section.sectionId ? section : entry))
+  );
 }

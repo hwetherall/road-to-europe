@@ -1,12 +1,16 @@
 'use client';
 
-import { SensitivityResult, Team } from '@/lib/types';
+import { SensitivityMetric, SensitivityResult, Team } from '@/lib/types';
 
 interface Props {
   results: SensitivityResult[];
   selectedTeam: string;
   teams: Team[];
   metricLabel: string;
+  baselineValue?: number | null;
+  metricOptions?: { key: SensitivityMetric; label: string }[];
+  activeMetric?: SensitivityMetric;
+  onMetricChange?: (metric: SensitivityMetric) => void;
 }
 
 function getTeamName(abbr: string, teams: Team[]): string {
@@ -18,12 +22,23 @@ export default function SensitivityChart({
   selectedTeam,
   teams,
   metricLabel,
+  metricOptions,
+  activeMetric,
+  onMetricChange,
 }: Props) {
-  const sorted = [...results].sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
-  const involvingSelected = sorted.filter(
+  // Compute spread (best - worst outcome) for each fixture and sort by it
+  const withSpread = results.map((r) => {
+    const deltas = [r.deltaIfHomeWin, r.deltaIfDraw, r.deltaIfAwayWin];
+    const best = Math.max(...deltas);
+    const worst = Math.min(...deltas);
+    return { ...r, spread: best - worst };
+  });
+  withSpread.sort((a, b) => b.spread - a.spread);
+
+  const involvingSelected = withSpread.filter(
     (r) => r.homeTeam === selectedTeam || r.awayTeam === selectedTeam
   );
-  const notInvolvingSelected = sorted.filter(
+  const notInvolvingSelected = withSpread.filter(
     (r) => r.homeTeam !== selectedTeam && r.awayTeam !== selectedTeam
   );
 
@@ -32,9 +47,8 @@ export default function SensitivityChart({
     ...notInvolvingSelected.slice(0, 2),
   ];
 
-  // If there are not enough fixtures in one bucket, fill from remaining highest-impact rows.
   const usedIds = new Set(preferredRows.map((r) => r.fixtureId));
-  const fallbackRows = sorted.filter((r) => !usedIds.has(r.fixtureId));
+  const fallbackRows = withSpread.filter((r) => !usedIds.has(r.fixtureId));
   const displayRows = [...preferredRows, ...fallbackRows].slice(0, 5);
   const teamName = getTeamName(selectedTeam, teams);
 
@@ -42,92 +56,158 @@ export default function SensitivityChart({
     return (
       <div className="mb-8">
         <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
-          High-Leverage Fixtures
+          Games That Matter
         </h2>
-        <p className="text-xs text-white/30 mb-4">
-          Fixtures with the biggest impact on {teamName}&apos;s {metricLabel}. Green
-          = good for {teamName}, red = bad.
-        </p>
         <div className="border rounded-lg p-4 bg-white/[0.02] border-white/[0.08] text-xs text-white/50">
-          No high-leverage fixtures for this metric right now. The selected outcome is
-          effectively locked, so fixture-by-fixture sensitivity is not informative.
+          No high-leverage fixtures for this metric right now.
         </div>
       </div>
     );
   }
 
-  const maxDelta = Math.max(...displayRows.map((r) => r.maxAbsDelta), 1);
+  // Max absolute delta across all displayed fixtures — used to scale bars
+  const maxAbsDelta = Math.max(
+    ...displayRows.flatMap((r) => [
+      Math.abs(r.deltaIfHomeWin),
+      Math.abs(r.deltaIfDraw),
+      Math.abs(r.deltaIfAwayWin),
+    ]),
+    0.5
+  );
 
   return (
     <div className="mb-8">
-      <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
-        High-Leverage Fixtures
-      </h2>
+      <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+        <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50">
+          Games That Matter
+        </h2>
+        {metricOptions && metricOptions.length > 1 && onMetricChange && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/30 uppercase tracking-wider">Measuring</span>
+            <div className="flex gap-1">
+              {metricOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => onMetricChange(opt.key)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer border ${
+                    activeMetric === opt.key
+                      ? 'bg-white/[0.12] text-white/90 border-white/[0.2]'
+                      : 'bg-transparent text-white/35 border-white/[0.06] hover:text-white/55 hover:border-white/[0.12]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       <p className="text-xs text-white/30 mb-4">
-        Top 3 fixtures involving {teamName}, plus top 2 outside fixtures, by max impact on{' '}
-        {teamName}&apos;s {metricLabel}. Green = good for {teamName}, red = bad.
+        How much {teamName}&apos;s {metricLabel} change depending on the result.
       </p>
       <div className="space-y-2">
         {displayRows.map((r) => {
           const includesSelectedTeam =
             r.homeTeam === selectedTeam || r.awayTeam === selectedTeam;
-          const deltas = [
-            { label: `${getTeamName(r.homeTeam, teams)} win`, value: r.deltaIfHomeWin },
-            { label: 'Draw', value: r.deltaIfDraw },
-            { label: `${getTeamName(r.awayTeam, teams)} win`, value: r.deltaIfAwayWin },
+
+          // Build outcomes using absolute values from the sensitivity scan
+          const outcomes = [
+            {
+              label: `${getTeamName(r.homeTeam, teams)} win`,
+              delta: r.deltaIfHomeWin,
+              abs: r.absIfHomeWin,
+            },
+            {
+              label: 'Draw',
+              delta: r.deltaIfDraw,
+              abs: r.absIfDraw,
+            },
+            {
+              label: `${getTeamName(r.awayTeam, teams)} win`,
+              delta: r.deltaIfAwayWin,
+              abs: r.absIfAwayWin,
+            },
           ];
 
-          deltas.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+          // Sort best to worst for selected team
+          outcomes.sort((a, b) => b.delta - a.delta);
+
+          const bestOutcome = outcomes[0];
+          const worstOutcome = outcomes[outcomes.length - 1];
 
           return (
             <div
               key={r.fixtureId}
               className={`border rounded-lg p-3 ${
                 includesSelectedTeam
-                  ? 'bg-white/[0.03] border-white/[0.06]'
-                  : 'bg-cyan-500/[0.08] border-cyan-400/20'
+                  ? 'bg-white/[0.03] border-white/[0.08]'
+                  : 'bg-cyan-500/[0.06] border-cyan-400/15'
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
+              {/* Header: teams + spread */}
+              <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium">
                   {getTeamName(r.homeTeam, teams)}{' '}
                   <span className="text-white/30">vs</span>{' '}
                   {getTeamName(r.awayTeam, teams)}
                 </span>
-                <span className="text-xs text-white/40">
-                  Max impact: {r.maxAbsDelta.toFixed(1)}pp
+                <span className="text-xs text-white/40 font-mono">
+                  {r.spread.toFixed(1)}pp swing
                 </span>
               </div>
-              <div className="flex gap-2">
-                {deltas.map((d) => {
-                  const isPositive = d.value > 0;
-                  const width = (Math.abs(d.value) / maxDelta) * 100;
-                  return (
-                    <div key={d.label} className="flex-1">
-                      <div className="text-[10px] text-white/40 mb-1 truncate">
-                        {d.label}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 h-2 rounded-sm bg-white/[0.06] overflow-hidden">
-                          <div
-                            className="h-full rounded-sm transition-all duration-500"
-                            style={{
-                              width: `${Math.min(width, 100)}%`,
-                              background: isPositive ? '#22c55e' : '#ef4444',
-                            }}
-                          />
-                        </div>
-                        <span
-                          className="text-[11px] font-mono min-w-[3.5rem] text-right"
-                          style={{ color: isPositive ? '#22c55e' : '#ef4444' }}
-                        >
-                          {d.value > 0 ? '+' : ''}
-                          {d.value.toFixed(1)}pp
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+
+              {/* Center-emanating bar */}
+              <div className="relative h-5 mb-2">
+                {/* Track background */}
+                <div className="absolute inset-0 rounded bg-white/[0.04]" />
+                {/* Center line */}
+                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/[0.15]" />
+
+                {/* Red bar (worst outcome — grows left from center) */}
+                {worstOutcome.delta < 0 && (
+                  <div
+                    className="absolute top-0.5 bottom-0.5 rounded-l transition-all duration-500"
+                    style={{
+                      right: '50%',
+                      width: `${(Math.abs(worstOutcome.delta) / maxAbsDelta) * 50}%`,
+                      background: 'linear-gradient(270deg, #ef4444cc, #ef444455)',
+                    }}
+                  />
+                )}
+
+                {/* Green bar (best outcome — grows right from center) */}
+                {bestOutcome.delta > 0 && (
+                  <div
+                    className="absolute top-0.5 bottom-0.5 rounded-r transition-all duration-500"
+                    style={{
+                      left: '50%',
+                      width: `${(Math.abs(bestOutcome.delta) / maxAbsDelta) * 50}%`,
+                      background: 'linear-gradient(90deg, #22c55ecc, #22c55e55)',
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Outcome labels */}
+              <div className="flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-mono font-semibold text-red-400 shrink-0">
+                    {worstOutcome.abs.toFixed(1)}%
+                  </span>
+                  <span className="text-white/40 truncate">{worstOutcome.label}</span>
+                </div>
+
+                <div className="text-white/25 text-[10px] shrink-0 text-center">
+                  {outcomes[1].abs.toFixed(1)}% {outcomes[1].label.toLowerCase()}
+                </div>
+
+                <div className="flex items-center gap-1.5 min-w-0 justify-end">
+                  <span className="text-white/40 truncate">{bestOutcome.label}</span>
+                  <span className="font-mono font-semibold text-green-400 shrink-0">
+                    {bestOutcome.abs.toFixed(1)}%
+                  </span>
+                </div>
               </div>
             </div>
           );

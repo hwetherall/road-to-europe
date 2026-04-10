@@ -49,6 +49,11 @@ export interface SensitivityResult {
   deltaIfAwayWin: number;
   deltaIfDraw: number;
   maxAbsDelta: number;
+  // Absolute metric values from the sensitivity scan's own simulations
+  absIfHomeWin: number;
+  absIfAwayWin: number;
+  absIfDraw: number;
+  absBaseline: number;
 }
 
 export type SensitivityMetric =

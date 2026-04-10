@@ -36,8 +36,6 @@ import ChatSidebar from './ChatSidebar';
 import FixtureList from './FixtureList';
 import StandingsTable from './StandingsTable';
 import LeagueProjections from './LeagueProjections';
-import RefreshButton from './RefreshButton';
-import KyleToggle from './KyleToggle';
 import KyleMiniDashboard from './KyleMiniDashboard';
 import DeepAnalysisModal from './DeepAnalysisModal';
 import WhatIfAnalysis from './WhatIfAnalysis';
@@ -98,6 +96,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const [whatIfOpen, setWhatIfOpen] = useState(false);
   const [whatIfTarget, setWhatIfTarget] = useState<{ metric: keyof SimulationResult; label: string } | null>(null);
   const [showQuickStart, setShowQuickStart] = useState(false);
+  const [metricOverride, setMetricOverride] = useState<SensitivityMetric | null>(null);
   const [deepDivePreview, setDeepDivePreview] = useState<DeepDivePreviewState>({
     status: 'idle',
     summary: '',
@@ -144,11 +143,23 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     return getTeamContext(team, teams, result);
   }, [teams, selectedTeam, displayResult]);
 
-  const sensitivityMetric: SensitivityMetric = useMemo(
-    () => teamContext?.primaryMetric ?? 'top7Pct',
-    [teamContext]
-  );
+  const autoMetric: SensitivityMetric = teamContext?.primaryMetric ?? 'top7Pct';
+  const sensitivityMetric: SensitivityMetric = metricOverride ?? autoMetric;
   const sensitivityMetricLabel = SENSITIVITY_METRIC_LABELS[sensitivityMetric];
+
+  // Available metric options from the team's relevant cards
+  const metricOptions: { key: SensitivityMetric; label: string }[] = useMemo(() => {
+    if (!teamContext) return [];
+    return teamContext.relevantCards
+      .filter((c) => {
+        const k = c.key as string;
+        return k in SENSITIVITY_METRIC_LABELS;
+      })
+      .map((c) => ({
+        key: c.key as SensitivityMetric,
+        label: SENSITIVITY_METRIC_LABELS[c.key as SensitivityMetric],
+      }));
+  }, [teamContext]);
 
   const accentColor = getTeamColour(selectedTeam);
   const textColor = getTeamTextColour(selectedTeam);
@@ -167,6 +178,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   // URL state sync
   const handleSelectTeam = useCallback((abbr: string) => {
     setSelectedTeam(abbr);
+    setMetricOverride(null); // Reset to auto-pick for new team
     const url = new URL(window.location.href);
     url.searchParams.set('team', abbr);
     window.history.replaceState({}, '', url.toString());
@@ -272,6 +284,12 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       const results = simulate(teams, allFixtures, SIM_COUNT);
       setSimResults(results);
 
+      // Compute correct metric from fresh results
+      const teamResult = results.find((r) => r.team === selectedTeam);
+      const teamData = teams.find((t) => t.abbr === selectedTeam);
+      const ctx = teamData ? getTeamContext(teamData, teams, teamResult ?? undefined) : null;
+      const correctMetric = ctx?.primaryMetric ?? sensitivityMetric;
+
       setPhase('Running sensitivity analysis...');
 
       setTimeout(() => {
@@ -280,7 +298,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           allFixtures,
           selectedTeam,
           SENSITIVITY_SIMS,
-          sensitivityMetric
+          correctMetric
         );
         setSensitivityResults(sensitivity);
         setRunning(false);
@@ -329,6 +347,13 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           const results = simulate(fetchedTeams, fetchedFixtures, SIM_COUNT);
           setSimResults(results);
 
+          // Compute correct sensitivity metric from actual sim results
+          // (the closure-captured sensitivityMetric is stale — still 'top7Pct')
+          const teamResult = results.find((r) => r.team === initialTeam);
+          const teamData = fetchedTeams.find((t) => t.abbr === initialTeam);
+          const ctx = teamData ? getTeamContext(teamData, fetchedTeams, teamResult ?? undefined) : null;
+          const correctMetric = ctx?.primaryMetric ?? 'top7Pct';
+
           setPhase('Running sensitivity analysis...');
           setTimeout(() => {
             const sensitivity = sensitivityScan(
@@ -336,7 +361,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               fetchedFixtures,
               initialTeam,
               SENSITIVITY_SIMS,
-              sensitivityMetric
+              correctMetric
             );
             setSensitivityResults(sensitivity);
             setRunning(false);
@@ -696,34 +721,54 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       </div>
 
       <div className="border-b border-white/[0.06] bg-[#0b0b0b]">
-        <div className="max-w-[900px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[12px]">
-          <div className="flex items-center gap-2 text-white/55">
-            <span className="text-white/35">You are in:</span>
-            <span className="font-semibold text-white/90">{currentModeLabel}</span>
+        <div className="max-w-[900px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[12px]" style={sidebarOpen && !kyleActive ? { marginRight: '400px' } : undefined}>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrimaryRun}
+              disabled={running}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold font-oswald tracking-widest uppercase transition-all ${
+                running
+                  ? 'bg-white/[0.05] text-white/40 cursor-wait'
+                  : 'bg-gradient-to-br from-teal-500 to-teal-700 text-white hover:from-teal-400 hover:to-teal-600 cursor-pointer'
+              }`}
+            >
+              {running ? (
+                <>
+                  <div
+                    className="w-3 h-3 border-[1.5px] rounded-full animate-spin"
+                    style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.7)' }}
+                  />
+                  Simulating...
+                </>
+              ) : (
+                <>{'\u21BB'} Re-run</>
+              )}
+            </button>
             {!inBaselineView && (
               <button
                 type="button"
                 onClick={handleReturnToBaseline}
-                className="ml-2 px-2.5 py-1 rounded border border-white/[0.16] text-white/70 hover:text-white/90 hover:border-white/[0.3] transition-colors cursor-pointer"
+                className="px-2.5 py-1.5 rounded border border-white/[0.16] text-[11px] text-white/60 hover:text-white/90 hover:border-white/[0.3] transition-colors cursor-pointer"
               >
-                Return to baseline
+                Reset view
               </button>
             )}
           </div>
           <div className="flex items-center gap-3 text-white/65 flex-wrap">
             {primaryCard && primaryOdds !== null && (
               <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
-                <span className="text-white/40">Odds</span>
-                <span className="font-semibold text-white/95">{primaryCard.label} {primaryOdds.toFixed(1)}%</span>
+                <span className="text-white/40">{primaryCard.label}</span>
+                <span className="font-semibold text-white/95">{primaryOdds.toFixed(1)}%</span>
               </span>
             )}
             <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
               <span className="text-white/40">Remaining</span>
-              <span className="font-semibold text-white/95">{gamesRemaining} fixtures</span>
+              <span className="font-semibold text-white/95">{gamesRemaining}</span>
             </span>
             <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
-              <span className="text-white/40">Baseline</span>
-              <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()} sims</span>
+              <span className="text-white/40">Sims</span>
+              <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()}</span>
             </span>
           </div>
         </div>
@@ -757,160 +802,120 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           <div className="max-w-[900px] mx-auto px-4 py-6">
             {showQuickStart && (
               <div className="mb-6 rounded-xl border border-teal-400/30 bg-teal-400/[0.07] p-4">
-                <div className="font-oswald text-[12px] tracking-[0.14em] uppercase text-teal-200/90 mb-1">
-                  New here? Start in 3 steps
+                <div className="font-oswald text-[13px] tracking-[0.14em] uppercase text-teal-200/90 mb-2">
+                  Welcome to Keepwatch
                 </div>
-                <div className="text-[12px] text-white/65 mb-3">
-                  1) Run the baseline simulation, 2) try match outcomes, 3) ask the chat assistant for scenario ideas.
+                <div className="text-[12.5px] text-white/65 leading-5 mb-1">
+                  We&apos;ve simulated {SIM_COUNT.toLocaleString()} seasons using live standings and bookmaker odds.
+                  Your team&apos;s qualification probabilities are below.
                 </div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="text-[12px] text-white/45 leading-5 mb-3">
+                  <strong className="text-white/60">How to use:</strong>{' '}
+                  Scroll to explore the odds &rarr; Lock match outcomes to test scenarios &rarr; Generate a detailed report for deeper analysis.
+                </div>
+                <button
+                  type="button"
+                  onClick={dismissQuickStart}
+                  className="px-3 py-1.5 rounded-lg text-[11px] text-white/50 border border-white/[0.15] hover:text-white/75 hover:border-white/[0.28] transition-colors cursor-pointer"
+                >
+                  Got it
+                </button>
+              </div>
+            )}
+
+            {/* Action bar */}
+            <div className="flex items-center gap-3 mb-7 flex-wrap">
+              <button
+                onClick={() => {
+                  noteFirstInteraction();
+                  setWhatIfActive(!whatIfActive);
+                }}
+                className={`px-5 py-3 rounded-lg text-[13px] font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
+                  whatIfActive
+                    ? 'text-white border-amber-500/50'
+                    : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20 hover:text-white/70'
+                }`}
+                style={
+                  whatIfActive
+                    ? { background: 'rgba(245,158,11,0.15)' }
+                    : undefined
+                }
+                title="Lock match results and see how they change your odds"
+              >
+                {whatIfActive ? 'Exit Match Outcomes' : 'Lock Match Outcomes'}
+              </button>
+              <button
+                onClick={() => {
+                  noteFirstInteraction();
+                  setDeepAnalysisOpen(true);
+                }}
+                className="px-5 py-3 rounded-lg text-[13px] font-bold font-oswald tracking-widest uppercase transition-all border-none cursor-pointer bg-gradient-to-br from-teal-500 to-teal-700 text-white hover:from-teal-400 hover:to-teal-600 flex items-center gap-2"
+                title="Generate an AI-powered detailed analysis report"
+              >
+                <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                  <path d="M3 2.5h9M3 5.5h9M3 8.5h5M3 11.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                </svg>
+                {deepDivePreview.status === 'ready' ? 'View Report' : 'Generate Report'}
+              </button>
+              <button
+                onClick={() => {
+                  noteFirstInteraction();
+                  if (sidebarOpen) {
+                    handleChatClose();
+                  } else {
+                    setSidebarOpen(true);
+                  }
+                }}
+                className={`px-4 py-2.5 rounded-lg text-[12px] font-oswald tracking-wider uppercase transition-all border cursor-pointer relative ${
+                  sidebarOpen
+                    ? 'text-white font-bold'
+                    : 'bg-transparent text-white/40 border-white/[0.08] hover:border-white/15 hover:text-white/55'
+                }`}
+                style={
+                  sidebarOpen
+                    ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
+                    : undefined
+                }
+                title="Open AI chat to explore scenarios in conversation"
+              >
+                Chat
+                {chapters.length > 0 && !sidebarOpen && (
+                  <span
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center text-white"
+                    style={{ background: accentColor }}
+                  >
+                    {chapters.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Report preview (only shown when a cached report exists) */}
+            {deepDivePreview.status === 'ready' && (
+              <div
+                className="mb-6 rounded-lg border px-4 py-3 cursor-pointer hover:border-teal-400/40 transition-colors"
+                style={{ borderColor: `${accentColor}25`, background: `${accentColor}08` }}
+                onClick={() => setDeepAnalysisOpen(true)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-oswald text-[11px] tracking-[0.12em] uppercase text-white/55 mb-1">
+                      Latest Report
+                    </div>
+                    <div className="text-[12.5px] text-white/70 leading-5">
+                      {deepDivePreview.keyScenario || deepDivePreview.summary}
+                    </div>
+                  </div>
                   <button
                     type="button"
-                    onClick={handlePrimaryRun}
-                    className="px-4 py-2 rounded-lg text-xs font-bold font-oswald tracking-widest uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); setDeepAnalysisOpen(true); }}
+                    className="shrink-0 self-center px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
                   >
-                    Start Guided Simulation
-                  </button>
-                  <button
-                    type="button"
-                    onClick={dismissQuickStart}
-                    className="px-4 py-2 rounded-lg text-xs text-white/60 border border-white/[0.18] hover:text-white/80 hover:border-white/[0.32] transition-colors cursor-pointer"
-                  >
-                    Hide guide
+                    View Report
                   </button>
                 </div>
               </div>
             )}
-
-            {/* Toolbar */}
-            <div className="flex items-center gap-4 mb-7 flex-wrap">
-              <div className="flex items-start gap-3 flex-wrap">
-                <div className="flex flex-col gap-1">
-                  <div className="text-[10px] tracking-[0.12em] uppercase text-white/28 font-oswald px-1">
-                    Explore
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <button
-                      onClick={() => {
-                        noteFirstInteraction();
-                        setWhatIfActive(!whatIfActive);
-                      }}
-                      className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
-                        whatIfActive
-                          ? 'text-white border-amber-500/50'
-                          : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20'
-                      }`}
-                      style={
-                        whatIfActive
-                          ? { background: 'rgba(245,158,11,0.15)' }
-                          : undefined
-                      }
-                      title="Open match outcomes to lock specific results"
-                    >
-                      {whatIfActive ? 'Exit Match Outcomes' : 'Try Match Outcomes'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        noteFirstInteraction();
-                        if (sidebarOpen) {
-                          handleChatClose();
-                        } else {
-                          setSidebarOpen(true);
-                        }
-                      }}
-                      className={`px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer relative ${
-                        sidebarOpen
-                          ? 'text-white'
-                          : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20'
-                      }`}
-                      style={
-                        sidebarOpen
-                          ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
-                          : undefined
-                      }
-                      title="Open guided scenario chat"
-                    >
-                      Ask Chat
-                      {chapters.length > 0 && !sidebarOpen && (
-                        <span
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white"
-                          style={{ background: accentColor }}
-                        >
-                          {chapters.length}
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <div className="text-[10px] tracking-[0.12em] uppercase text-white/28 font-oswald px-1">
-                    Advanced
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <KyleToggle
-                      active={kyleActive}
-                      onToggle={handleKyleToggle}
-                      accentColor={accentColor}
-                    />
-                    <button
-                      onClick={() => {
-                        noteFirstInteraction();
-                        setDeepAnalysisOpen(true);
-                      }}
-                      className="px-5 py-3.5 rounded-lg text-sm font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer bg-transparent text-white/55 border-white/[0.12] hover:border-white/20 hover:text-white/70 flex items-center gap-2"
-                      title="Open a detailed long-form report with key swing fixtures"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-                        <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.2" />
-                        <path d="M7.5 4.5V8.5L10 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      Detailed Report
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-6 rounded-lg border border-white/[0.08] bg-white/[0.015] px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="font-oswald text-[11px] tracking-[0.12em] uppercase text-white/68">
-                      Deep Dive Snapshot
-                    </div>
-                  </div>
-
-                  {deepDivePreview.status === 'loading' && (
-                    <div className="text-[12px] text-white/45">
-                      Checking cached deep dive summary...
-                    </div>
-                  )}
-
-                  {deepDivePreview.status === 'ready' && (
-                    <div className="text-[12px] text-white/67 leading-5">
-                      {deepDivePreview.keyScenario || deepDivePreview.summary}
-                    </div>
-                  )}
-
-                  {(deepDivePreview.status === 'missing' || deepDivePreview.status === 'disabled' || deepDivePreview.status === 'error') && (
-                    <div className="text-[12px] text-white/50 leading-5">
-                      {deepDivePreview.status === 'disabled'
-                        ? 'Detailed-report cache is not configured for this deployment yet.'
-                        : 'No deep dive yet for this scenario — run one now and we’ll show the key takeaway here.'}
-                    </div>
-                  )}
-
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setDeepAnalysisOpen(true)}
-                  className="shrink-0 self-center px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
-                >
-                  {deepDivePreview.status === 'ready' ? 'View Report' : 'Generate Report'}
-                </button>
-              </div>
-            </div>
 
             {running && phase && (
               <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${textColor}cc` }}>
@@ -973,7 +978,37 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 selectedTeam={selectedTeam}
                 teams={teams}
                 metricLabel={sensitivityMetricLabel}
+                baselineValue={displayResult ? (displayResult[sensitivityMetric] as number) : null}
+                metricOptions={metricOptions}
+                activeMetric={sensitivityMetric}
+                onMetricChange={setMetricOverride}
               />
+            )}
+
+            {/* Report CTA — nudge after sensitivity data */}
+            {sensitivityResults && deepDivePreview.status !== 'ready' && (
+              <div className="mb-8 rounded-xl border border-teal-400/20 bg-gradient-to-br from-teal-400/[0.06] to-transparent p-5">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="font-oswald text-[13px] tracking-[0.1em] uppercase text-white/75 mb-1">
+                      Go deeper
+                    </div>
+                    <div className="text-[12px] text-white/50 leading-5 max-w-[480px]">
+                      Generate an AI-powered report that analyses the key swing fixtures above and identifies what to watch for.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDeepAnalysisOpen(true)}
+                    className="shrink-0 px-5 py-3 rounded-lg text-[12px] font-bold font-oswald tracking-widest uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+                      <path d="M3 2.5h9M3 5.5h9M3 8.5h5M3 11.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                    </svg>
+                    Generate Report
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* League Projections */}
@@ -1039,17 +1074,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               </div>
             </div>
 
-            {/* Low-priority refresh action at page bottom */}
-            <div className="mb-2 pt-2 border-t border-white/[0.06]">
-              <RefreshButton
-                onRefresh={handlePrimaryRun}
-                running={running}
-                hasResults={simResults !== null}
-                fixtureCount={allFixtures.filter((f) => f.status === 'SCHEDULED').length}
-                simCount={SIM_COUNT}
-                tonedDown
-              />
-            </div>
+            {/* Re-run is now in the top status bar */}
           </div>
         </div>
 

@@ -127,6 +127,7 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
 
   for (const fixture of scheduledFixtures) {
     const deltas: Record<string, number> = {};
+    const absVals: Record<string, number> = {};
     for (const result of ['home', 'draw', 'away'] as const) {
       const lock: FixtureLock = {
         fixtureId: fixture.id,
@@ -144,6 +145,7 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
         targetMetric
       );
       deltas[result] = odds - baselineOdds;
+      absVals[result] = odds;
     }
     sensitivity.push({
       fixtureId: fixture.id,
@@ -157,6 +159,10 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
         Math.abs(deltas.draw),
         Math.abs(deltas.away)
       ),
+      absIfHomeWin: absVals.home,
+      absIfAwayWin: absVals.away,
+      absIfDraw: absVals.draw,
+      absBaseline: baselineOdds,
     });
   }
   sensitivity.sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);

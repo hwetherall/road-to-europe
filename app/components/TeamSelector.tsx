@@ -15,7 +15,7 @@ export default function TeamSelector({ teams, selectedTeam, onSelectTeam }: Prop
   return (
     <>
       {/* Desktop: Badge grid */}
-      <div className="hidden md:flex flex-wrap gap-1.5 mt-4">
+      <div className="hidden md:grid grid-cols-10 gap-1.5 mt-4 w-full">
         {sorted.map((t) => {
           const isSelected = t.abbr === selectedTeam;
           const color = TEAM_COLOURS[t.abbr] ?? '#888';
@@ -24,7 +24,7 @@ export default function TeamSelector({ teams, selectedTeam, onSelectTeam }: Prop
               key={t.abbr}
               onClick={() => onSelectTeam(t.abbr)}
               title={t.name}
-              className={`w-11 h-11 rounded-lg text-[10px] font-bold font-oswald tracking-wider transition-all border-2 cursor-pointer ${
+              className={`w-full h-11 rounded-lg text-[10px] font-bold font-oswald tracking-wider transition-all border-2 cursor-pointer ${
                 isSelected
                   ? 'scale-110 shadow-lg'
                   : 'border-white/10 hover:border-white/30 opacity-60 hover:opacity-100'

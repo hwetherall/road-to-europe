@@ -40,27 +40,24 @@ export function sensitivityScan(
       lockFixture(fixtures, fixture.id, 'home'),
       simsPerLock
     );
-    const deltaHome =
-      getMetricValue(homeWinResult.find((r) => r.team === targetTeam), metric) -
-      baselineValue;
+    const absHome = getMetricValue(homeWinResult.find((r) => r.team === targetTeam), metric);
+    const deltaHome = absHome - baselineValue;
 
     const awayWinResult = simulate(
       teams,
       lockFixture(fixtures, fixture.id, 'away'),
       simsPerLock
     );
-    const deltaAway =
-      getMetricValue(awayWinResult.find((r) => r.team === targetTeam), metric) -
-      baselineValue;
+    const absAway = getMetricValue(awayWinResult.find((r) => r.team === targetTeam), metric);
+    const deltaAway = absAway - baselineValue;
 
     const drawResult = simulate(
       teams,
       lockFixture(fixtures, fixture.id, 'draw'),
       simsPerLock
     );
-    const deltaDraw =
-      getMetricValue(drawResult.find((r) => r.team === targetTeam), metric) -
-      baselineValue;
+    const absDraw = getMetricValue(drawResult.find((r) => r.team === targetTeam), metric);
+    const deltaDraw = absDraw - baselineValue;
 
     results.push({
       fixtureId: fixture.id,
@@ -74,6 +71,10 @@ export function sensitivityScan(
         Math.abs(deltaAway),
         Math.abs(deltaDraw)
       ),
+      absIfHomeWin: absHome,
+      absIfAwayWin: absAway,
+      absIfDraw: absDraw,
+      absBaseline: baselineValue,
     });
   }
 

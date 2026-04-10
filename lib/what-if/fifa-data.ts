@@ -135,7 +135,7 @@ function mapRow(row: Record<string, string>): PlayerQuality {
 
 function isEnglishPL(row: Record<string, string>): boolean {
   // league_id 13 = English Premier League (avoids Ukrainian PL which is also 'Premier League')
-  if (row['league_id']) return row['league_id'] === '13';
+  if (row['league_id']) return Number(row['league_id']) === 13;
   return row['league_name'] === 'Premier League';
 }
 

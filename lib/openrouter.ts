@@ -13,12 +13,29 @@ export interface OpenRouterMessage {
   tool_call_id?: string;
 }
 
-export interface OpenRouterTool {
+export interface OpenRouterFunctionTool {
   type: 'function';
   function: {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
+  };
+}
+
+export type OpenRouterServerToolType = `openrouter:${string}`;
+
+export interface OpenRouterServerTool {
+  type: OpenRouterServerToolType;
+}
+
+export type OpenRouterTool = OpenRouterFunctionTool | OpenRouterServerTool;
+
+export interface OpenRouterResponseFormat {
+  type: 'json_schema';
+  json_schema: {
+    name: string;
+    strict?: boolean;
+    schema: Record<string, unknown>;
   };
 }
 
@@ -38,6 +55,8 @@ export async function callOpenRouter(
     model?: string;
     tools?: OpenRouterTool[];
     maxTokens?: number;
+    responseFormat?: OpenRouterResponseFormat;
+    /** @deprecated Use tools: [{ type: "openrouter:web_search" }] instead */
     plugins?: Array<{ id: string; max_results?: number }>;
   } = {}
 ): Promise<OpenRouterMessage> {
@@ -45,6 +64,7 @@ export async function callOpenRouter(
     model = 'anthropic/claude-opus-4.6',
     tools,
     maxTokens = 400000,
+    responseFormat,
     plugins,
   } = options;
 
@@ -54,6 +74,7 @@ export async function callOpenRouter(
     max_tokens: maxTokens,
   };
   if (tools && tools.length > 0) body.tools = tools;
+  if (responseFormat) body.response_format = responseFormat;
   if (plugins && plugins.length > 0) body.plugins = plugins;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {

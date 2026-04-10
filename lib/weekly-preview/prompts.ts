@@ -1,3 +1,4 @@
+import type { FactCheckCorrection } from '@/lib/weekly-preview/fact-check-types';
 import {
   WEEKLY_PREVIEW_SECTION_ORDER,
   WeeklyPreviewDossier,
@@ -67,16 +68,21 @@ function sectionSpecificInstructions(sectionId: WeeklyPreviewSectionId): string 
       ].join('\n');
     case 'club-focus':
       return [
-        'Newcastle only. Cover the injury picture and what it means tactically -- not just who is out, but what it changes about shape, tempo, and options.',
+        'This section owns NEWCASTLE INTERNALLY -- the squad, the shape, the personnel decisions. Do not discuss the opponent here.',
+        'Cover: (1) who is out and why, (2) what tactical shape the absences force, (3) who steps in and what changes about tempo/style, (4) the likely starting XI.',
+        'Focus on current-season form and roles, not raw EA ratings. "Tonali has been the midfield anchor all season" beats "Tonali is rated 86."',
         'Do NOT repeat the baseline probability or leverage numbers from earlier sections.',
-        'Focus on current-season context: who has been playing well, who is being relied on, what the likely XI looks like given absences. Avoid leaning on raw EA ratings when you can describe form or role instead.',
+        'Do NOT preview the opponent -- that belongs entirely in match-focus.',
       ].join('\n');
     case 'match-focus':
       return [
-        'Write in pundit voice. Preview Newcastle match, split into Opportunities and Risks.',
-        'Use specific, verifiable details: recent results, tactical tendencies, head-to-head angles. Prefer "Mateta scored in their 3-0 Conference League win over Fiorentina" over "Mateta has 82 shooting."',
-        'Do NOT repeat the injury list -- reference it with a brief nod ("without Bruno, as covered above") and focus on the tactical consequences.',
-        'Verify squad data: only discuss players who actually play for that club. Check the squad profiles carefully.',
+        'This section owns THE OPPONENT and THE MATCHUP. Do not re-describe Newcastle injuries or squad composition -- club-focus already covered that.',
+        'Split into Opportunities and Risks, framed entirely around the opponent:',
+        'OPPORTUNITIES: Where does the opponent have weaknesses Newcastle can exploit? Use opponent-specific details -- their defensive vulnerabilities, tactical tendencies, recent results that reveal patterns.',
+        'RISKS: How will the opponent target Newcastle? Frame through the opponent attacking approach, not by restating Newcastle absences. "Palace will commit bodies forward on set pieces to overload the box" rather than "Botman and Thiaw lack composure."',
+        'Reference Newcastle injuries with a single brief nod ("with the reshuffled backline, as covered above") then move on to how the opponent exploits it.',
+        'Use specific, verifiable details: recent match results, tactical tendencies, head-to-head angles. Prefer "Mateta scored in their 3-0 Conference League win over Fiorentina" over "Mateta has 82 shooting."',
+        'Verify squad data: only discuss players who actually play for that club.',
       ].join('\n');
     case 'perfect-weekend':
       return [
@@ -162,58 +168,25 @@ ${retryNote ? `\n\nRetry correction:\n${retryNote}` : ''}
 `;
 }
 
-export function buildFactCheckPrompt(sections: WeeklyPreviewSectionArtifact[]): string {
-  const allMarkdown = sections
-    .map((s) => `--- ${s.sectionId} ---\n${s.markdown}`)
-    .join('\n\n');
-
-  return `You are a Premier League fact-checker for the 2025-26 season. Below is a draft weekly preview. Your ONLY job is to identify factual errors.
-
-IMPORTANT: You MUST search the web to verify each claim before flagging it. Do NOT rely on your training data -- it may be outdated. Search for current 2025-26 squad information before claiming a player is at the wrong club.
-
-Check for:
-1. PLAYER-CLUB: Search the web for each named player to confirm they are currently at the club described in the 2025-26 season. Only flag a player if your web search confirms they are NOT at that club right now.
-2. MANAGERS: Search to confirm the named manager is currently in charge.
-3. RECENT RESULTS: Search for any specific match results mentioned to verify scores and competitions.
-4. FIXTURES: Search to confirm that the fixtures mentioned are real scheduled Premier League matches for the current matchday.
-
-Do NOT flag:
-- Simulation probabilities or percentage claims (those are computed, not factual)
-- Tactical opinions or subjective analysis
-- Player ratings (those come from an internal database)
-- Claims you cannot verify via web search -- if in doubt, do NOT flag it
-
-CRITICAL: Only flag something if your web search CONFIRMS it is wrong. If you cannot find clear evidence of an error, leave it alone. False corrections are worse than missed errors.
-
-Return strict JSON only:
-{
-  "corrections": [
-    {
-      "claim": "the exact text or claim that is wrong",
-      "correction": "what the correct fact is, based on your web search",
-      "sectionId": "which section contains the error",
-      "severity": "high | medium"
-    }
-  ]
-}
-
-If everything checks out or you cannot confirm any errors, return: { "corrections": [] }
-
-Draft to check:
-${allMarkdown}`;
-}
-
 export function buildFinalEditorPrompt(input: {
   dossier: WeeklyPreviewDossier;
   sections: WeeklyPreviewSectionArtifact[];
-  factCheckCorrections?: Array<{ claim: string; correction: string; sectionId: string; severity: string }>;
+  factCheckCorrections?: FactCheckCorrection[];
 }): string {
   const injuryUpdates = input.dossier.clubFactSheet?.injuryUpdates ?? [];
   const corrections = input.factCheckCorrections ?? [];
 
-  const factCheckBlock = corrections.length > 0
-    ? `\n0. FACT-CHECK CORRECTIONS (HIGHEST PRIORITY): A fact-checker has flagged the following errors. Fix ALL of them by rewriting the affected passages:\n${JSON.stringify(corrections, null, 2)}\n`
-    : '';
+  let factCheckBlock = '';
+  if (corrections.length > 0) {
+    const correctionDetails = corrections.map((c) => {
+      const evidenceSummary = c.evidence
+        .map((e) => `  - [${e.sourceType}] ${e.title}: ${e.supports} (${e.url})`)
+        .join('\n');
+      return `• Section "${c.sectionId}" (severity: ${c.severity}, confidence: ${c.confidence.toFixed(2)}):\n  Claim: ${c.claim}\n  Correction: ${c.correction}\n  Evidence:\n${evidenceSummary}`;
+    });
+
+    factCheckBlock = `\n0. FACT-CHECK CORRECTIONS (HIGHEST PRIORITY): A claim-level fact-checker has identified the following errors, each backed by live web evidence. Fix ALL of them by rewriting the affected passages:\n\n${correctionDetails.join('\n\n')}\n`;
+  }
 
   return `You are KeepWatch's final editor. Your job is to catch and fix specific quality issues.
 

@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto';
 import { callOpenRouter } from '@/lib/openrouter';
 import { buildWeeklyPreviewDossier } from '@/lib/weekly-preview/dossier';
 import { upsertWeeklyPreviewDraft } from '@/lib/weekly-preview/cache';
-import { buildFactCheckPrompt, buildFinalEditorPrompt, buildSectionSystemPrompt, buildSectionUserPrompt } from '@/lib/weekly-preview/prompts';
+import { runFactCheckPipeline } from '@/lib/weekly-preview/fact-check';
+import type { FactCheckCorrection } from '@/lib/weekly-preview/fact-check-types';
+import { buildFinalEditorPrompt, buildSectionSystemPrompt, buildSectionUserPrompt } from '@/lib/weekly-preview/prompts';
 import { validatePerfectWeekend, validateSections, validateSingleSection } from '@/lib/weekly-preview/validators';
 import {
   WEEKLY_PREVIEW_SECTION_ORDER,
@@ -13,15 +15,7 @@ import {
 } from '@/lib/weekly-preview/types';
 
 const SECTION_MODEL = 'anthropic/claude-sonnet-4-6';
-const EDITOR_MODEL = 'anthropic/claude-sonnet-4-6';
-const FACT_CHECK_MODEL = 'google/gemini-3.1-flash-lite-preview';
-
-interface FactCheckCorrection {
-  claim: string;
-  correction: string;
-  sectionId: string;
-  severity: 'high' | 'medium';
-}
+const EDITOR_MODEL = 'anthropic/claude-opus-4-6';
 
 function parseSection(content: string): WeeklyPreviewSectionArtifact {
   const cleaned = content.trim();
@@ -133,38 +127,27 @@ export async function generateWeeklyPreviewDraft(input?: {
     return section;
   });
 
-  // Fact-check pass: fast, cheap model with current knowledge
+  // Claim-level fact-check: extract atomic claims, verify each against live
+  // web sources, and only pass evidence-backed contradictions to the editor.
+  // This replaces the old monolithic memory-based pass that produced false
+  // corrections from stale model knowledge.
   let factCheckCorrections: FactCheckCorrection[] = [];
+  let factCheckLlmCalls = 0;
   try {
-    const factCheckMessage = await callOpenRouter(
-      [
-        { role: 'system', content: 'You are a Premier League fact-checker. Output strict JSON only. Search the web to verify every claim before flagging it.' },
-        { role: 'user', content: buildFactCheckPrompt(orderedSections) },
-      ],
-      {
-        model: FACT_CHECK_MODEL,
-        maxTokens: 15000,
-        plugins: [{ id: 'web', max_results: 5 }],
-      }
+    const pipelineResult = await runFactCheckPipeline(orderedSections);
+    factCheckCorrections = pipelineResult.corrections;
+    // Extraction = 1 call, verification = ceil(verified / batchSize) calls
+    factCheckLlmCalls = 1 + Math.ceil(
+      pipelineResult.totalClaims / 5
     );
-    llmCalls++;
-
-    const parsed = parseJsonPayload<{ corrections?: FactCheckCorrection[] }>(
-      factCheckMessage.content ?? '{}'
-    );
-    factCheckCorrections = parsed.corrections ?? [];
-    if (factCheckCorrections.length > 0) {
-      console.log(
-        `[weekly-preview] fact-checker found ${factCheckCorrections.length} correction(s):`,
-        factCheckCorrections.map((c) => `${c.sectionId}: ${c.claim} -> ${c.correction}`)
-      );
-    }
   } catch (error) {
     console.warn(
-      '[weekly-preview] fact-check pass failed, continuing without corrections:',
+      '[weekly-preview] fact-check pipeline failed, continuing without corrections:',
       error instanceof Error ? error.message : error
     );
   }
+
+  llmCalls += factCheckLlmCalls;
 
   const editorMessage = await callOpenRouter(
     [
@@ -215,7 +198,7 @@ export async function generateWeeklyPreviewDraft(input?: {
       sectionAgentCalls: 8,
       editorCalls: 1,
       factCheckCorrections: factCheckCorrections.length,
-      model: `sections=${SECTION_MODEL}, factCheck=${FACT_CHECK_MODEL}, editor=${EDITOR_MODEL}`,
+      model: `sections=${SECTION_MODEL}, factCheck=claim-level-pipeline, editor=${EDITOR_MODEL}`,
     },
   };
 

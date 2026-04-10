@@ -441,13 +441,15 @@ export async function buildWeeklyPreviewDossier(
             : [];
         })()
       : [],
-    // Perfect-weekend needs the baseline once (for table context) plus all deltas and cumulative
+    // Perfect-weekend needs the baseline once (for table context) plus all deltas, resulting percentages, and cumulative
     'perfect-weekend': [
       buildAllowedClaim('perfect-baseline', 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
-      ...perfectWeekend.map((entry, index) =>
-        buildAllowedClaim(`perfect-delta-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam}`, entry.deltaPp, 'pp', `perfectWeekend[${index}].deltaPp`)
-      ),
+      ...perfectWeekend.flatMap((entry, index) => [
+        buildAllowedClaim(`perfect-delta-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam} delta`, entry.deltaPp, 'pp', `perfectWeekend[${index}].deltaPp`),
+        buildAllowedClaim(`perfect-result-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam} resulting top-7`, entry.resultingTop7Pct, 'percent', `perfectWeekend[${index}].resultingTop7Pct`),
+      ]),
       buildAllowedClaim('perfect-cumulative', 'Perfect weekend cumulative delta', perfectWeekendCumulativeDeltaPp, 'pp', 'perfectWeekendCumulativeDeltaPp'),
+      buildAllowedClaim('perfect-cumulative-result', 'Perfect weekend resulting top-7', selectedClubBaseline.top7Pct + perfectWeekendCumulativeDeltaPp, 'percent', 'selectedClubBaseline.top7Pct + perfectWeekendCumulativeDeltaPp'),
     ],
     // Summary: no numeric claims — synthesis only, no restating numbers
     summary: [],

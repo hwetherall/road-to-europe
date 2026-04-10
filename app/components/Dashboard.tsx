@@ -754,6 +754,12 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 Reset view
               </button>
             )}
+            <a
+              href="/weekly-preview"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.16] text-[11px] font-bold font-oswald tracking-widest uppercase text-white/60 hover:text-white/90 hover:border-white/[0.3] transition-colors"
+            >
+              Weekly Preview
+            </a>
           </div>
           <div className="flex items-center gap-3 text-white/65 flex-wrap">
             {primaryCard && primaryOdds !== null && (

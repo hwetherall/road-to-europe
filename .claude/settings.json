@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx tsx -e ':*)",
       "Bash(npx tsx --tsconfig tsconfig.json -e ':*)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(npx jest:*)"
     ]
   }
 }

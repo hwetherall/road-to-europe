@@ -238,8 +238,8 @@ export async function POST(req: NextRequest) {
       const squadContext = await buildSquadContext(teamName);
 
       // Diagnosis agent: compare_squads + web_search only
-      const diagnosisTools = WHAT_IF_TOOLS.filter((t) =>
-        ['compare_squads', 'web_search'].includes(t.function.name)
+      const diagnosisTools = WHAT_IF_TOOLS.filter(
+        (t) => t.type === 'function' && ['compare_squads', 'web_search'].includes(t.function.name)
       );
 
       const scenarioAccumulator: CounterfactualScenario[] = [];
@@ -418,7 +418,7 @@ export async function POST(req: NextRequest) {
       const squadContext = await buildSquadContext(teamName);
 
       // Stress test agent: web_search only
-      const stressTestTools = WHAT_IF_TOOLS.filter((t) => t.function.name === 'web_search');
+      const stressTestTools = WHAT_IF_TOOLS.filter((t) => t.type === 'function' && t.function.name === 'web_search');
       const scenarioAccumulator: CounterfactualScenario[] = [];
       const searchTrail: WhatIfSearchTraceEntry[] = [];
       const executors = createToolExecutors(

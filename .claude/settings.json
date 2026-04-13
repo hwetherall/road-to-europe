@@ -4,7 +4,11 @@
       "Bash(npx tsx -e ':*)",
       "Bash(npx tsx --tsconfig tsconfig.json -e ':*)",
       "Bash(npx tsx:*)",
-      "Bash(npx jest:*)"
+      "Bash(npx jest:*)",
+      "Bash(pip show:*)",
+      "Bash(python -c \"from dotenv import load_dotenv, find_dotenv; p = find_dotenv\\(\\); print\\('Found .env at:', p\\); load_dotenv\\(p\\); import os; url=os.environ.get\\('SUPABASE_URL','NOT SET'\\); key=os.environ.get\\('SUPABASE_SERVICE_ROLE_KEY','NOT SET'\\); print\\('URL:', url\\); print\\('Key starts with:', key[:15] if key != 'NOT SET' else 'NOT SET'\\)\")",
+      "Bash(python -c \"import supabase._sync.client; import inspect; src = inspect.getsource\\(supabase._sync.client.SyncClient.__init__\\); print\\(src[:2000]\\)\")",
+      "Bash(python -c ':*)"
     ]
   }
 }

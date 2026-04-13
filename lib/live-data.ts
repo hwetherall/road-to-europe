@@ -8,6 +8,7 @@ import {
 import { averageBookmakerOdds } from '@/lib/odds-converter';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { teamElo, eloProb } from '@/lib/elo';
+import { getLatestStoredH2H } from '@/lib/odds-snapshots';
 
 interface FootballDataMatchTeam {
   name: string;
@@ -242,10 +243,11 @@ export async function getOddsData(): Promise<DataSourceResult<OddsEntry[]>> {
 }
 
 export async function getLiveSnapshot(): Promise<LiveSnapshot> {
-  const [standingsResult, fixturesResult, oddsResult] = await Promise.all([
+  const [standingsResult, fixturesResult, oddsResult, storedH2H] = await Promise.all([
     getStandingsData(),
     getFixturesData(),
     getOddsData(),
+    getLatestStoredH2H(),
   ]);
 
   const teams = standingsResult.data;
@@ -262,7 +264,8 @@ export async function getLiveSnapshot(): Promise<LiveSnapshot> {
   const knownFixtures = fixturesResult.data.map((fixture) => {
     if (fixture.status === 'FINISHED') return fixture;
 
-    const liveOdds = oddsLookup.get(`${fixture.homeTeam}-${fixture.awayTeam}`);
+    const fixtureKey = `${fixture.homeTeam}-${fixture.awayTeam}`;
+    const liveOdds = oddsLookup.get(fixtureKey);
     if (liveOdds && liveOdds.homeWin > 0) {
       return {
         ...fixture,
@@ -270,6 +273,19 @@ export async function getLiveSnapshot(): Promise<LiveSnapshot> {
         drawProb: liveOdds.draw,
         awayWinProb: liveOdds.awayWin,
         probSource: 'odds_api' as const,
+      };
+    }
+
+    // Fallback: use stored snapshot odds if available
+    const stored = storedH2H.get(fixtureKey);
+    if (stored && stored.homeWin > 0 && stored.awayWin > 0) {
+      const drawProb = Math.max(0, 1 - stored.homeWin - stored.awayWin);
+      return {
+        ...fixture,
+        homeWinProb: stored.homeWin,
+        drawProb,
+        awayWinProb: stored.awayWin,
+        probSource: 'odds_stored' as const,
       };
     }
 

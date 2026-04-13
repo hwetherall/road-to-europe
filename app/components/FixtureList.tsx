@@ -45,8 +45,9 @@ export default function FixtureList({ fixtures, selectedTeam, teams, accentColor
         {teamName} Remaining Fixtures
       </h2>
       <p className="text-xs text-white/35 mb-3">
-        Near-term matches use live bookmaker prices;
-        longer-range fixtures are estimated using <span className="text-white/55 font-semibold">ELO ratings</span> (slightly less accurate).
+        <span className="text-emerald-300/60">LIVE</span> = current bookmaker odds &middot;{' '}
+        <span className="text-blue-300/55">SNAP</span> = from a previous odds snapshot &middot;{' '}
+        <span className="text-white/40">EST</span> = Elo-estimated (bookmakers haven&apos;t listed these yet)
       </p>
       <div className="flex flex-col gap-1.5">
         {teamFixtures.map((f) => {
@@ -100,8 +101,13 @@ export default function FixtureList({ fixtures, selectedTeam, teams, accentColor
                   </div>
                 </div>
                 {f.probSource === 'elo_estimated' && (
-                  <span className="text-[9px] text-white/35 tracking-wider border border-white/10 rounded px-1.5 py-0.5" title="Estimated from Elo ratings for longer-range fixtures">
+                  <span className="text-[9px] text-white/35 tracking-wider border border-white/10 rounded px-1.5 py-0.5" title="Estimated from Elo ratings — no bookmaker odds available yet">
                     EST
+                  </span>
+                )}
+                {f.probSource === 'odds_stored' && (
+                  <span className="text-[9px] text-blue-300/65 tracking-wider border border-blue-300/20 rounded px-1.5 py-0.5" title="From stored bookmaker odds snapshot — not currently listed by bookmakers">
+                    SNAP
                   </span>
                 )}
                 {f.probSource === 'odds_api' && (

@@ -39,6 +39,8 @@ import LeagueProjections from './LeagueProjections';
 import KyleMiniDashboard from './KyleMiniDashboard';
 import DeepAnalysisModal from './DeepAnalysisModal';
 import WhatIfAnalysis from './WhatIfAnalysis';
+import OddsMovementChart from './OddsMovementChart';
+import ValueBetTracker from './ValueBetTracker';
 
 const SIM_COUNT = 10000;
 const SENSITIVITY_SIMS = 1000;
@@ -74,6 +76,9 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<string>('');
   const [dataSource, setDataSource] = useState<string>('');
+  const [oddsPulling, setOddsPulling] = useState(false);
+  const [oddsPullResult, setOddsPullResult] = useState<string | null>(null);
+  const [liveOddsCount, setLiveOddsCount] = useState(0);
 
   // What-If state
   const [whatIfActive, setWhatIfActive] = useState(false);
@@ -205,7 +210,9 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       }
 
       type OddsEntry = { homeTeam: string; awayTeam: string; date: string; homeWin: number; draw: number; awayWin: number };
+      type StoredOddsEntry = { homeWin: number; awayWin: number; snapshotAt: string };
       const oddsLookup = new Map<string, OddsEntry>();
+      let storedOddsLookup: Record<string, StoredOddsEntry> = {};
       if (oddsRes.ok) {
         const oddsData = await oddsRes.json();
         if (oddsData.odds?.length > 0) {
@@ -216,6 +223,9 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               oddsLookup.set(`${homeAbbr}-${awayAbbr}`, o);
             }
           }
+        }
+        if (oddsData.storedOdds) {
+          storedOddsLookup = oddsData.storedOdds as Record<string, StoredOddsEntry>;
         }
       }
 
@@ -234,6 +244,19 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 drawProb: liveOdds.draw,
                 awayWinProb: liveOdds.awayWin,
                 probSource: 'odds_api' as const,
+              };
+            }
+
+            // Fallback: use stored snapshot odds if available
+            const stored = storedOddsLookup[oddsKey];
+            if (stored && stored.homeWin > 0 && stored.awayWin > 0) {
+              const drawProb = Math.max(0, 1 - stored.homeWin - stored.awayWin);
+              return {
+                ...fixture,
+                homeWinProb: stored.homeWin,
+                drawProb,
+                awayWinProb: stored.awayWin,
+                probSource: 'odds_stored' as const,
               };
             }
 
@@ -262,6 +285,11 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
           const generated = generateRemainingFixtures(nextTeams, known);
           nextFixtures = [...known, ...generated];
           setFixtures(nextFixtures);
+
+          const liveCount = nextFixtures.filter(
+            (f: Fixture) => f.status === 'SCHEDULED' && (f.probSource === 'odds_api' || f.probSource === 'odds_stored')
+          ).length;
+          setLiveOddsCount(liveCount);
         }
       }
     } catch {
@@ -470,6 +498,30 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       chapters: prev.chapters.filter((c) => c.type !== 'fixture_lock'),
     }));
   }, []);
+
+  // Manual odds pull handler
+  const handleOddsPull = useCallback(async () => {
+    setOddsPulling(true);
+    setOddsPullResult(null);
+    try {
+      const res = await fetch('/api/odds/snapshot', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setOddsPullResult(
+          `Pulled ${data.h2hCount} match odds → ${data.snapshotsInserted} snapshots stored`
+        );
+        // Re-fetch data to pick up any new odds
+        fetchData();
+      } else {
+        setOddsPullResult('Pull failed — check CRON_SECRET');
+      }
+    } catch {
+      setOddsPullResult('Pull failed — network error');
+    } finally {
+      setOddsPulling(false);
+      setTimeout(() => setOddsPullResult(null), 8000);
+    }
+  }, [fetchData]);
 
   // Kyle mode handlers
   const handleKyleToggle = useCallback(() => {
@@ -754,6 +806,29 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 Reset view
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleOddsPull}
+              disabled={oddsPulling}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
+                oddsPulling
+                  ? 'bg-white/[0.05] text-white/40 border-white/[0.08] cursor-wait'
+                  : 'border-white/[0.16] text-white/60 hover:text-white/90 hover:border-white/[0.3]'
+              }`}
+              title="Pull latest odds from bookmakers and save snapshot"
+            >
+              {oddsPulling ? (
+                <>
+                  <div
+                    className="w-3 h-3 border-[1.5px] rounded-full animate-spin"
+                    style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.7)' }}
+                  />
+                  Pulling...
+                </>
+              ) : (
+                <>&#x21E9; Pull Odds</>
+              )}
+            </button>
             <a
               href="/weekly-preview"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.16] text-[11px] font-bold font-oswald tracking-widest uppercase text-white/60 hover:text-white/90 hover:border-white/[0.3] transition-colors"
@@ -776,9 +851,25 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               <span className="text-white/40">Sims</span>
               <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()}</span>
             </span>
+            <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
+              <span className="text-white/40">Live Odds</span>
+              <span className={`font-semibold ${liveOddsCount > 0 ? 'text-emerald-400' : 'text-white/50'}`}>
+                {liveOddsCount}
+              </span>
+            </span>
           </div>
         </div>
       </div>
+
+      {/* Odds pull result notification */}
+      {oddsPullResult && (
+        <div className="border-b border-white/[0.06] bg-emerald-500/[0.08]">
+          <div className="max-w-[900px] mx-auto px-4 py-2 text-[11px] text-emerald-300/80 flex items-center gap-2">
+            <span>&#x2713;</span>
+            {oddsPullResult}
+          </div>
+        </div>
+      )}
 
       {/* Content area with sidebar */}
       <div className={`flex ${kyleActive ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
@@ -1027,6 +1118,19 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 teams={teams}
               />
             )}
+
+            {/* Odds Movement Chart */}
+            <OddsMovementChart
+              selectedTeam={selectedTeam}
+              teams={teams}
+              accentColor={accentColor}
+            />
+
+            {/* Value Bet Tracker */}
+            <ValueBetTracker
+              teams={teams}
+              accentColor={accentColor}
+            />
 
             {/* Fixture List */}
             <FixtureList

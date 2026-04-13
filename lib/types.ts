@@ -24,7 +24,7 @@ export interface Fixture {
   homeWinProb?: number;
   drawProb?: number;
   awayWinProb?: number;
-  probSource: 'odds_api' | 'elo_estimated';
+  probSource: 'odds_api' | 'odds_stored' | 'elo_estimated';
 }
 
 export interface SimulationResult {

@@ -22,6 +22,12 @@ import {
   OpenRouterError,
   OpenRouterTool,
 } from '@/lib/openrouter';
+import {
+  getInjuriesForClubs,
+  formatInjuriesForPrompt,
+  isInjuryDataConfigured,
+  InjuryRecord,
+} from '@/lib/injuries';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
@@ -136,7 +142,7 @@ For EACH team listed, perform ALL of these searches. Do not skip any.
 ### Core verification (3 searches per team)
 1. "[team] manager head coach 2025-26" — WHO is the current manager? This is the #1 source of errors. Managers get sacked constantly.
 2. "[team] squad key players 2025-26 season" — WHO plays for this team NOW? Verify every name. Players transfer and get loaned.
-3. "[team] injuries suspensions ${currentDate.split(' ').slice(1).join(' ')}" — who is currently OUT?
+3. "[team] injuries suspensions ${currentDate.split(' ').slice(1).join(' ')}" — who is currently OUT? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
 
 ### Form and results (2 searches per team)
 4. "[team] recent results form 2026" — last 5-6 results with scores
@@ -201,7 +207,7 @@ Teams: ${teamsToResearch.join(', ')}
 ## REQUIRED SEARCHES — LIGHT TIER
 For each team, do 2-3 searches:
 1. "[team] manager form results March 2026" — current manager + recent form
-2. "[team] injuries key absences 2026" — who's missing?
+2. "[team] injuries key absences 2026" — who's missing? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
 3. "[team] home away record 2025-26" — only if the team's home/away split is relevant
 
 You have a budget of up to 15 searches. Be efficient.
@@ -223,6 +229,73 @@ BRIEF CONTEXT: [1-2 sentences on their season — are they in a relegation fight
 - Do NOT pad with generic analysis. Keep it factual and brief.`;
 }
 
+function buildRivalResearchPrompt(
+  teamName: string,
+  rivalsToResearch: { name: string; abbr: string; reason: string }[],
+  targetMetric: string
+): string {
+  const currentDate = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  const rivalList = rivalsToResearch
+    .map(r => `- ${r.name} (${r.reason})`)
+    .join('\n');
+
+  const objectiveContext = targetMetric === 'championPct'
+    ? 'title race'
+    : targetMetric === 'relegationPct'
+      ? 'relegation battle'
+      : 'European qualification race';
+
+  return `You are a football research assistant investigating the RIVALS of ${teamName} in the ${objectiveContext}. The current date is ${currentDate}. The Premier League season is 2025-26.
+
+## YOUR TASK
+Research each rival's RECENT TRAJECTORY to provide comparative context for ${teamName}'s analysis. The goal is to answer: "While ${teamName} has been doing X, their rivals have been doing Y." This is about momentum and direction, not tactical detail.
+
+## RIVALS TO RESEARCH
+${rivalList}
+
+## REQUIRED SEARCHES — RIVAL TIER
+For EACH rival, perform these searches:
+
+### 1. Recent form and results (2 searches per rival — MOST IMPORTANT)
+1. "[rival] results April 2026" or "[rival] last 5 results 2026" — Get the ACTUAL SCORES of their last 4-6 matches. Include cup matches — they tell the form story. This is the single most important search.
+2. "[rival] form run momentum 2025-26" — Are they surging, wobbling, or collapsing? Look for streak data, points-per-game over last 10 matches, any narrative about their trajectory.
+
+### 2. Remaining fixtures (1 search per rival)
+3. "[rival] remaining fixtures schedule 2025-26" — What's left? Is the run-in easy or brutal? Are there direct clashes with other rivals?
+
+### 3. Key context (1 search per rival — if budget allows)
+4. "[rival] injuries absences April 2026" — Any major absences that change their trajectory? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
+
+You have a budget of up to 12 searches. Prioritise searches 1-2 (form and results) above everything else — the recent results with actual scores are what the writing agent needs most.
+
+## OUTPUT FORMAT
+\`\`\`factsheet
+RIVAL: [rival name]
+ROLE IN RACE: [e.g. "Direct title rival — 2nd on 64 points, 3 behind Arsenal"]
+LAST 6 RESULTS (MOST RECENT FIRST):
+- [date or matchday] [opponent] [score] [competition] [H/A]
+- [date or matchday] [opponent] [score] [competition] [H/A]
+- ...
+FORM TRAJECTORY: [1-2 sentences — are they surging, steady, or collapsing? How do the last 4-6 results compare to their season average?]
+REMAINING FIXTURES: [List remaining PL fixtures if found, note difficulty]
+KEY ABSENCES: [Current injuries/suspensions if found]
+MOMENTUM NARRATIVE: [2-3 sentences capturing the rival's story ARC over the last month. This is the critical output — it should read like a pundit summary. E.g. "City have gone up a gear at exactly the moment Arsenal are wobbling — three consecutive wins including a 4-0 demolition of Liverpool and 3-0 at Chelsea suggest Guardiola's side have found their best form of the season at the business end."]
+---
+\`\`\`
+
+Repeat for each rival.
+
+## CRITICAL RULES
+- Get ACTUAL SCORES with opponents. "Won 3-0 at Chelsea" tells a story. "W W W" does not.
+- Include cup results — they are part of the form/momentum picture (a Carabao Cup final win or FA Cup exit shapes narrative).
+- The MOMENTUM NARRATIVE is the most valuable output. It's what the writing agent will use to frame the comparative story. Make it specific and punchy.
+- If you cannot find recent results, write "RESULTS NOT FOUND" — do NOT invent scores.
+- Verify the rival's current points total and position — these change every gameweek.`;
+}
+
 function buildWritingPrompt(
   pathResult: PathSearchResult,
   config: PathSearchConfig,
@@ -232,7 +305,8 @@ function buildWritingPrompt(
   gapToTarget: number,
   gamesRemaining: number,
   factSheet: string,
-  sortedTeams: Team[]
+  sortedTeams: Team[],
+  rivals: { name: string; abbr: string; reason: string }[] = []
 ): string {
   const isRelegation = config.targetMetric === 'relegationPct';
   const isChampion = config.targetMetric === 'championPct';
@@ -241,6 +315,12 @@ function buildWritingPrompt(
     : isRelegation
       ? 'avoiding relegation'
       : 'qualifying for Europe';
+
+  const objectiveContext = isChampion
+    ? 'title race'
+    : isRelegation
+      ? 'relegation battle'
+      : 'European qualification race';
 
   // Get the decisive match info
   const decisive = pathResult.sensitivityData[0];
@@ -254,7 +334,22 @@ You have been given a VERIFIED FACT SHEET from a research agent. You may ONLY re
 
 ## VERIFIED FACT SHEET
 ${factSheet}
+${rivals.length > 0 ? `
+## RIVAL CONTEXT (USE THIS)
+The fact sheet contains a "rival-context" section with recent form, results, and momentum narratives for ${teamName}'s direct rivals in this ${objectiveContext}. This is ESSENTIAL context for your analysis.
 
+Rivals identified: ${rivals.map(r => `${r.name} (${r.reason})`).join(', ')}
+
+You MUST use this rival context in at least two places:
+1. **contextNarrative (State of Play)**: The story of ${teamName}'s season is incomplete without the rival trajectory. If ${teamName} is wobbling while their rival surges (or vice versa), THAT is the story — not just ${teamName}'s form in isolation.
+2. **bottomLine summary**: The central tension of any positional race is comparative. "Arsenal are folding at the exact moment City are surging" is a fundamentally different story from "Arsenal have lost three of four." Frame the bottom line as a two-sided narrative when the rival context supports it.
+
+You may also reference rivals in:
+- **matchesToWatch**: When a rival's fixture appears in the sensitivity data, the "whyItsPlausible" should reference the rival's current form from the rival-context section.
+- **keyScenario**: If the optimal path depends on a rival dropping points, name the rival and acknowledge whether that's likely given their trajectory.
+
+DO NOT just append rival info as an afterthought. Weave it into the narrative. The best analyses make the reader feel the competitive tension between teams, not just the target team's situation in a vacuum.
+` : ''}
 ## SIMULATION DATA
 Team: ${teamName} (${config.targetTeam})
 Position: ${position}th, ${points} points
@@ -326,8 +421,15 @@ For each match:
 Produce 3-4 matches to watch. Include a MIX: some should be the target team's own fixtures (if they appear in the sensitivity data), some should be rival fixtures.
 
 ### Good "bottomLine"
-- "summary": 2-3 sentences. A pundit wrapping up the segment. Name the central tension. ("Tottenham's survival hinges on their bizarre split personality — they need to keep performing like a mid-table side on the road while somehow not being the worst home team in the division.")
-- "keyScenario": ONE concrete sentence naming the specific combination of results that creates the strongest plausible swing. ("Beat Chelsea away in their worst form of the season, beat Everton at home to end the home drought, and let Arsenal handle West Ham — that combination drops Spurs' relegation probability to around 4%.")
+- "summary": 2-3 sentences. A pundit wrapping up the segment. Name the central tension — and if rival context is available, the tension should be COMPARATIVE.
+
+GOOD (with rival context): "Arsenal's title challenge has reached the point where form matters more than the table — and the form tells a terrifying story. Three defeats in four matches, including a cup final loss to City and a home defeat to Bournemouth, would be concerning in isolation. But it's City's simultaneous surge — demolishing Liverpool 4-0, winning 3-0 at Chelsea, and beating Arsenal themselves in the Carabao Cup final — that transforms a wobble into a crisis. The gap is still three points in Arsenal's favour, but the momentum has inverted completely."
+
+BAD (without rival context): "Arsenal's title challenge has reached the stage where the maths is overwhelmingly in their favour but the football is sending warning signals. Consecutive defeats suggest the strain of a three-front campaign is beginning to tell. The next three weeks will determine whether Arteta's squad can close this out, or whether the wobble becomes a collapse that hands Man City an improbable lifeline."
+
+The BAD example treats the title race as one team's story alone. The word "improbable" reveals the writer doesn't know what the rival has been doing. The GOOD example makes the reader feel the momentum shift because it names specific rival results.
+
+- "keyScenario": ONE concrete sentence. If a rival's trajectory makes a scenario more/less plausible, acknowledge it. ("If Arsenal beat Fulham and win at the Etihad their title probability reaches 99.9% — but City's current four-match winning run, including a 4-0 demolition of Liverpool, suggests that Etihad trip is no longer the formality it looked a month ago.")
 
 ## OUTPUT FORMAT
 Return a JSON object wrapped in \`\`\`json blocks. Match this exact structure:
@@ -383,7 +485,7 @@ Return a JSON object wrapped in \`\`\`json blocks. Match this exact structure:
 3. NEVER repeat stat-pill numbers (position, points, gap, baseline odds) in the contextNarrative — the UI already displays these prominently.
 4. "risks" are about the OPPONENT's threat to ${teamName}. "angles" are about ${teamName}'s opportunity against the opponent. Don't mix them up.
 5. Every "angle" must contain a TACTICAL MECHANISM. "Good away form" is NOT an angle. "Counter-pressing system suits away fixtures because it invites pressure then exploits the space behind the opponent's committed full-backs" IS an angle.
-6. ${isRelegation ? 'This is a RELEGATION analysis. Frame everything through the lens of survival: points needed, safety margins, "must-not-lose" fixtures. The tone should acknowledge the precariousness without being fatalistic.' : isChampion ? 'This is a TITLE analysis. Frame everything through the lens of maintaining/closing the gap, and rivals dropping points.' : 'This is a EUROPEAN QUALIFICATION analysis. Frame everything through the lens of climbing the table and overhauling the teams above.'}
+6. ${isRelegation ? `This is a RELEGATION analysis. Frame everything through survival — but survival is RELATIVE. If ${teamName}'s rivals in the drop zone are also losing, the picture is less dire than if rivals are picking up points while ${teamName} stalls. Use the rival context to calibrate the urgency: are the teams around them pulling away, or are they all drowning together?` : isChampion ? `This is a TITLE analysis. The title race is ALWAYS a two-team (or three-team) story. Use the rival context to frame whether ${teamName}'s current form represents a growing advantage, a narrowing gap, or a collapsing lead. "Still top of the table" means something very different if the rival has won 6 straight versus lost 3 of 4. The TRAJECTORY COMPARISON is the story.` : `This is a EUROPEAN QUALIFICATION analysis. Frame everything through the lens of climbing the table — but climbing requires others to slip. Use the rival context to assess whether the teams above ${teamName} are vulnerable or pulling away. If a rival is wobbling, name it and explain why that opens a door.`}
 7. NEVER duplicate fixtures in matchesToWatch. Each fixture must appear EXACTLY ONCE. If you find yourself listing the same matchup twice, remove the duplicate. Produce exactly 3-4 UNIQUE matches.
 7. VERIFY TEAM MOTIVATIONS AGAINST THE STANDINGS TABLE. Before claiming a team is "in the European race", "fighting for the title", "battling relegation", or has any competitive motivation, CHECK their actual league position in the standings table above. A 17th-placed team is NOT in a European race. A 3rd-placed team is NOT in a relegation battle. Get this right — it destroys credibility when you get it wrong.
 8. SENSITIVITY ≠ COMPETITIVENESS. A fixture appearing in the sensitivity data means its result significantly affects ${teamName}'s odds — it does NOT mean the fixture is closely matched or competitive. A dominant favourite beating a bottom-half team can be high-leverage. Do not describe a fixture as "competitive" or "closely contested" based solely on its presence in sensitivity data. Check the standings and form data to make actual competitiveness claims.`;
@@ -394,15 +496,48 @@ async function runResearchPhase(
   config: PathSearchConfig,
   teamName: string,
   teamsToResearch: string[],
-  depth: 'deep' | 'light' = 'deep'
+  depth: 'deep' | 'rival' | 'light' = 'deep',
+  rivals?: { name: string; abbr: string; reason: string }[],
+  injuryMap?: Record<string, InjuryRecord[]>
 ): Promise<{ factSheet: string; sources: string[]; searchCount: number }> {
   if (teamsToResearch.length === 0) {
     return { factSheet: '', sources: [], searchCount: 0 };
   }
 
-  const systemPrompt = depth === 'deep'
-    ? buildDeepResearchPrompt(pathResult, config, teamName, teamsToResearch)
-    : buildLightResearchPrompt(teamName, teamsToResearch);
+  // Build pre-loaded injury block from Supabase data
+  let injuryBlock = '';
+  if (injuryMap && Object.keys(injuryMap).length > 0) {
+    const sections: string[] = [];
+    for (const teamNameEntry of teamsToResearch) {
+      const teamObj = config.teams.find(t => t.name === teamNameEntry);
+      if (!teamObj) continue;
+      const injuries = injuryMap[teamObj.abbr.toUpperCase()];
+      if (injuries) {
+        sections.push(formatInjuriesForPrompt(injuries, teamNameEntry));
+      }
+    }
+    if (sections.length > 0) {
+      injuryBlock = `\n\n## PRE-LOADED INJURY DATA (from premierinjuries.com — scraped today)\nThe following injury/availability data has been pre-fetched from a verified database. Do NOT search for injuries — use this data directly and copy it into the INJURIES/SUSPENSIONS field of your fact sheet.\n\n${sections.join('\n\n')}`;
+    }
+  }
+
+  let systemPrompt: string;
+  let maxRounds: number;
+
+  switch (depth) {
+    case 'deep':
+      systemPrompt = buildDeepResearchPrompt(pathResult, config, teamName, teamsToResearch) + injuryBlock;
+      maxRounds = 18;
+      break;
+    case 'rival':
+      systemPrompt = buildRivalResearchPrompt(teamName, rivals ?? [], config.targetMetric) + injuryBlock;
+      maxRounds = 8;
+      break;
+    case 'light':
+      systemPrompt = buildLightResearchPrompt(teamName, teamsToResearch) + injuryBlock;
+      maxRounds = 10;
+      break;
+  }
 
   const conversation: OpenRouterMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -411,7 +546,7 @@ async function runResearchPhase(
 
   const sources: string[] = [];
   let searchCount = 0;
-  const MAX_ROUNDS = depth === 'deep' ? 18 : 10;
+  const MAX_ROUNDS = maxRounds;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const message = await callOpenRouter(conversation, { tools: TOOLS });
@@ -626,10 +761,11 @@ async function runWritingPhase(
   gapToTarget: number,
   gamesRemaining: number,
   factSheet: string,
-  sortedTeams: Team[]
+  sortedTeams: Team[],
+  rivals: { name: string; abbr: string; reason: string }[] = []
 ): Promise<Partial<DeepAnalysis>> {
   const systemPrompt = buildWritingPrompt(
-    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, factSheet, sortedTeams
+    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, factSheet, sortedTeams, rivals
   );
 
   const conversation: OpenRouterMessage[] = [
@@ -718,6 +854,79 @@ async function runWritingPhase(
   return analysis;
 }
 
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function identifyRivals(
+  config: PathSearchConfig,
+  teamName: string,
+  targetTeam: string,
+  position: number,
+  points: number,
+  gamesRemaining: number,
+  sortedTeams: Team[]
+): { name: string; abbr: string; reason: string }[] {
+  const rivals: { name: string; abbr: string; reason: string }[] = [];
+
+  const getPos = (abbr: string) => sortedTeams.findIndex(t => t.abbr === abbr) + 1;
+  const getPts = (abbr: string) => sortedTeams.find(t => t.abbr === abbr)?.points ?? 0;
+
+  if (config.targetMetric === 'championPct') {
+    const maxGap = gamesRemaining * 3;
+    for (const team of config.teams) {
+      if (team.abbr === targetTeam) continue;
+      const teamPosition = getPos(team.abbr);
+      const teamPoints = getPts(team.abbr);
+      if (teamPosition <= 3 && Math.abs(teamPoints - points) <= maxGap) {
+        rivals.push({
+          name: team.name,
+          abbr: team.abbr,
+          reason: `Direct title rival — ${ordinal(teamPosition)} on ${teamPoints} points`,
+        });
+      }
+    }
+    return rivals.slice(0, 2);
+  }
+
+  if (config.targetMetric === 'relegationPct') {
+    for (const team of config.teams) {
+      if (team.abbr === targetTeam) continue;
+      const teamPosition = getPos(team.abbr);
+      const teamPoints = getPts(team.abbr);
+      if (teamPosition >= 15 && teamPosition <= 20 && Math.abs(teamPoints - points) <= 4) {
+        rivals.push({
+          name: team.name,
+          abbr: team.abbr,
+          reason: `Relegation rival — ${ordinal(teamPosition)} on ${teamPoints} points`,
+        });
+      }
+    }
+    return rivals.slice(0, 3);
+  }
+
+  // European qualification (top4, top5, top6, top7)
+  const targetPosition = config.targetMetric === 'top4Pct' ? 4
+    : config.targetMetric === 'top6Pct' ? 6 : 7;
+
+  for (const team of config.teams) {
+    if (team.abbr === targetTeam) continue;
+    const teamPosition = getPos(team.abbr);
+    const teamPoints = getPts(team.abbr);
+    if (teamPosition >= targetPosition - 2 && teamPosition <= targetPosition + 3
+        && Math.abs(teamPoints - points) <= 6) {
+      rivals.push({
+        name: team.name,
+        abbr: team.abbr,
+        reason: `Competing for ${ordinal(targetPosition)} — ${ordinal(teamPosition)} on ${teamPoints} points`,
+      });
+    }
+  }
+  return rivals.slice(0, 3);
+}
+
 async function narrateAnalysis(
   pathResult: PathSearchResult,
   config: PathSearchConfig,
@@ -753,21 +962,45 @@ async function narrateAnalysis(
     if (awayTeamObj && !tier1Teams.has(awayTeamObj.name)) tier2Teams.add(awayTeamObj.name);
   }
 
+  // ── Identify rivals for comparative context ──
+  const rivals = identifyRivals(config, teamName, config.targetTeam, position, points, gamesRemaining, sortedTeams);
+  const rivalTeams = rivals.filter(r =>
+    !tier1Teams.has(r.name) && !tier2Teams.has(r.name)
+  );
+
+  // ── Pre-fetch injury data from Supabase for all teams ──
+  // One batch query replaces ~10+ unreliable web searches across all tiers
+  let injuryMap: Record<string, InjuryRecord[]> = {};
+  if (isInjuryDataConfigured()) {
+    const allTeamNames = new Set([...tier1Teams, ...tier2Teams, ...rivalTeams.map(r => r.name)]);
+    const allAbbrs = [...allTeamNames]
+      .map(name => config.teams.find(t => t.name === name)?.abbr)
+      .filter((a): a is string => !!a);
+    injuryMap = await getInjuriesForClubs(allAbbrs);
+    console.log(`[Deep Analysis] Pre-fetched injury data for ${Object.keys(injuryMap).length} clubs`);
+  }
+
   // Phase A1: Deep research on decisive match teams (10-12 searches per team)
   const { factSheet: deepFactSheet, sources: deepSources, searchCount: deepCount } =
-    await runResearchPhase(pathResult, config, teamName, [...tier1Teams], 'deep');
+    await runResearchPhase(pathResult, config, teamName, [...tier1Teams], 'deep', undefined, injuryMap);
+
+  // Phase A1.5: Rival research (form trajectory + recent results)
+  const { factSheet: rivalFactSheet, sources: rivalSources, searchCount: rivalCount } =
+    rivalTeams.length > 0
+      ? await runResearchPhase(pathResult, config, teamName, rivalTeams.map(r => r.name), 'rival', rivals, injuryMap)
+      : { factSheet: '', sources: [], searchCount: 0 };
 
   // Phase A2: Light research on matches-to-watch teams (2-3 searches per team)
   const { factSheet: lightFactSheet, sources: lightSources, searchCount: lightCount } =
-    await runResearchPhase(pathResult, config, teamName, [...tier2Teams], 'light');
+    await runResearchPhase(pathResult, config, teamName, [...tier2Teams], 'light', undefined, injuryMap);
 
-  const combinedFactSheet = deepFactSheet + '\n\n' + lightFactSheet;
-  const allSources = [...deepSources, ...lightSources];
-  const totalSearchCount = deepCount + lightCount;
+  const combinedFactSheet = [deepFactSheet, rivalFactSheet, lightFactSheet].filter(Boolean).join('\n\n');
+  const allSources = [...deepSources, ...rivalSources, ...lightSources];
+  const totalSearchCount = deepCount + rivalCount + lightCount;
 
   // Phase B: Write
   const analysis = await runWritingPhase(
-    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, combinedFactSheet, sortedTeams
+    pathResult, config, teamName, position, points, gapToTarget, gamesRemaining, combinedFactSheet, sortedTeams, rivals
   );
 
   return { analysis, sources: allSources, searchCount: totalSearchCount };

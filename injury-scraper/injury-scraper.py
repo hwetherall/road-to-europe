@@ -15,7 +15,7 @@ Environment variables (or .env file):
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -223,7 +223,7 @@ def parse_injury_table(html: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 3.  Supabase upsert
+# 3.  Supabase full refresh (truncate + insert)
 # ---------------------------------------------------------------------------
 
 def get_supabase_client() -> SupabaseClient:
@@ -238,9 +238,10 @@ def get_supabase_client() -> SupabaseClient:
     return create_client(url, key)
 
 
-def upsert_injuries(client: SupabaseClient, records: list[dict]) -> dict:
+def refresh_injuries_table(client: SupabaseClient, records: list[dict]) -> dict:
     """
-    Upsert injury records into Supabase.
+    Fully refresh injury records in Supabase.
+    Deletes all existing rows in `injuries`, then inserts the latest scrape.
     Returns a summary dict with counts.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -262,37 +263,26 @@ def upsert_injuries(client: SupabaseClient, records: list[dict]) -> dict:
             "scraped_at":  now,
         })
 
-    if not rows:
-        return {"upserted": 0, "errors": 0}
-
-    # Batch upsert — Supabase handles ON CONFLICT (club, player) DO UPDATE
-    result = (
-        client.table("injuries")
-        .upsert(rows, on_conflict="club,player")
-        .execute()
-    )
-
-    return {
-        "upserted": len(result.data) if result.data else 0,
-        "total_sent": len(rows),
-    }
-
-
-def cleanup_stale_records(client: SupabaseClient, max_age_days: int = 30) -> int:
-    """
-    Delete injury records that haven't been refreshed in `max_age_days`.
-    These are players who recovered and dropped off the source site.
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
-
-    result = (
+    # Always clear table first so Supabase exactly mirrors the latest scrape.
+    # `scraped_at` is NOT NULL by schema, so this filter matches every row.
+    delete_result = (
         client.table("injuries")
         .delete()
-        .lt("scraped_at", cutoff)
+        .gte("scraped_at", "1900-01-01T00:00:00+00:00")
         .execute()
     )
+    deleted_count = len(delete_result.data) if delete_result.data else 0
 
-    return len(result.data) if result.data else 0
+    if not rows:
+        return {"deleted": deleted_count, "inserted": 0, "total_sent": 0}
+
+    insert_result = client.table("injuries").insert(rows).execute()
+
+    return {
+        "deleted": deleted_count,
+        "inserted": len(insert_result.data) if insert_result.data else 0,
+        "total_sent": len(rows),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -363,15 +353,11 @@ def main():
         print("  ✓ All checks passed.")
 
     # --- Upsert to Supabase ---
-    print("[4/4] Upserting to Supabase …")
+    print("[4/4] Refreshing Supabase injuries table …")
     client = get_supabase_client()
-    result = upsert_injuries(client, records)
-    print(f"  Upserted {result['upserted']}/{result['total_sent']} records.")
-
-    # --- Cleanup stale ---
-    stale_deleted = cleanup_stale_records(client)
-    if stale_deleted:
-        print(f"  Cleaned up {stale_deleted} stale records (>30 days old).")
+    result = refresh_injuries_table(client, records)
+    print(f"  Deleted {result['deleted']} existing records.")
+    print(f"  Inserted {result['inserted']}/{result['total_sent']} fresh records.")
 
     print("\nDone.\n")
 

@@ -1,27 +1,26 @@
 import { createHash, randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Fixture, Team } from '@/lib/types';
-import { WeeklyPreviewDraft, WEEKLY_PREVIEW_VERSION } from '@/lib/weekly-preview/types';
+import { RoundupDraft, WEEKLY_ROUNDUP_VERSION } from '@/lib/weekly-roundup/types';
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const TABLE_NAME = 'weekly_previews';
+const TABLE_NAME = 'weekly_roundups';
 
-interface WeeklyPreviewRow {
+interface WeeklyRoundupRow {
   id: string;
   version: string;
   season: string;
   matchday: number;
   club_abbr: string;
   status: 'draft' | 'published';
-  scheduled_for: string;
   generated_at: string;
+  data_hash: string;
   markdown: string;
-  dossier_json: WeeklyPreviewDraft['dossier'];
-  sections_json: WeeklyPreviewDraft['sections'];
-  sources_json: WeeklyPreviewDraft['sources'];
-  warnings_json: WeeklyPreviewDraft['warnings'];
-  metadata_json: WeeklyPreviewDraft['metadata'];
+  dossier_json: RoundupDraft['dossier'];
+  sections_json: RoundupDraft['sections'];
+  sources_json: RoundupDraft['sources'];
+  warnings_json: RoundupDraft['warnings'];
+  metadata_json: RoundupDraft['metadata'];
 }
 
 function getSupabaseAdminClient(): SupabaseClient | null {
@@ -32,56 +31,11 @@ function getSupabaseAdminClient(): SupabaseClient | null {
   });
 }
 
-export function isWeeklyPreviewConfigured(): boolean {
+export function isWeeklyRoundupConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
-export function createWeeklyPreviewDataHash(input: {
-  season: string;
-  club: string;
-  teams: Team[];
-  fixtures: Fixture[];
-}): string {
-  const teamsBlob = [...input.teams]
-    .sort((a, b) => a.abbr.localeCompare(b.abbr))
-    .map((team) => ({
-      abbr: team.abbr,
-      points: team.points,
-      goalDifference: team.goalDifference,
-      goalsFor: team.goalsFor,
-      goalsAgainst: team.goalsAgainst,
-      played: team.played,
-    }));
-
-  const fixturesBlob = [...input.fixtures]
-    .filter((fixture) => fixture.status === 'SCHEDULED')
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map((fixture) => ({
-      id: fixture.id,
-      matchday: fixture.matchday,
-      homeTeam: fixture.homeTeam,
-      awayTeam: fixture.awayTeam,
-      homeWinProb: fixture.homeWinProb,
-      drawProb: fixture.drawProb,
-      awayWinProb: fixture.awayWinProb,
-      probSource: fixture.probSource,
-    }));
-
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: WEEKLY_PREVIEW_VERSION,
-        season: input.season,
-        club: input.club,
-        teams: teamsBlob,
-        fixtures: fixturesBlob,
-      })
-    )
-    .digest('hex')
-    .slice(0, 24);
-}
-
-function mapRow(row: WeeklyPreviewRow): WeeklyPreviewDraft {
+function mapRow(row: WeeklyRoundupRow): RoundupDraft {
   return {
     id: row.id,
     version: row.version,
@@ -90,7 +44,6 @@ function mapRow(row: WeeklyPreviewRow): WeeklyPreviewDraft {
     club: row.club_abbr,
     status: row.status,
     generatedAt: new Date(row.generated_at).getTime(),
-    scheduledFor: row.scheduled_for,
     markdown: row.markdown,
     dossier: row.dossier_json,
     sections: row.sections_json,
@@ -100,17 +53,18 @@ function mapRow(row: WeeklyPreviewRow): WeeklyPreviewDraft {
   };
 }
 
-export async function getLatestWeeklyPreviewDraft(
+const SELECT_COLUMNS =
+  'id, version, season, matchday, club_abbr, status, generated_at, data_hash, markdown, dossier_json, sections_json, sources_json, warnings_json, metadata_json';
+
+export async function getLatestWeeklyRoundupDraft(
   club = 'NEW'
-): Promise<WeeklyPreviewDraft | null> {
+): Promise<RoundupDraft | null> {
   const client = getSupabaseAdminClient();
   if (!client) return null;
 
   const { data, error } = await client
     .from(TABLE_NAME)
-    .select(
-      'id, version, season, matchday, club_abbr, status, scheduled_for, generated_at, markdown, dossier_json, sections_json, sources_json, warnings_json, metadata_json'
-    )
+    .select(SELECT_COLUMNS)
     .eq('club_abbr', club)
     .eq('status', 'draft')
     .order('generated_at', { ascending: false })
@@ -118,21 +72,19 @@ export async function getLatestWeeklyPreviewDraft(
     .maybeSingle();
 
   if (error || !data) return null;
-  return mapRow(data as WeeklyPreviewRow);
+  return mapRow(data as WeeklyRoundupRow);
 }
 
-export async function getWeeklyPreviewByMatchday(
+export async function getWeeklyRoundupByMatchday(
   matchday: number,
   club = 'NEW'
-): Promise<WeeklyPreviewDraft | null> {
+): Promise<RoundupDraft | null> {
   const client = getSupabaseAdminClient();
   if (!client) return null;
 
   const { data, error } = await client
     .from(TABLE_NAME)
-    .select(
-      'id, version, season, matchday, club_abbr, status, scheduled_for, generated_at, markdown, dossier_json, sections_json, sources_json, warnings_json, metadata_json'
-    )
+    .select(SELECT_COLUMNS)
     .eq('club_abbr', club)
     .eq('matchday', matchday)
     .order('generated_at', { ascending: false })
@@ -140,12 +92,12 @@ export async function getWeeklyPreviewByMatchday(
     .maybeSingle();
 
   if (error || !data) return null;
-  return mapRow(data as WeeklyPreviewRow);
+  return mapRow(data as WeeklyRoundupRow);
 }
 
-export async function upsertWeeklyPreviewDraft(
-  draft: WeeklyPreviewDraft
-): Promise<{ persisted: boolean; draft: WeeklyPreviewDraft }> {
+export async function upsertWeeklyRoundupDraft(
+  draft: RoundupDraft
+): Promise<{ persisted: boolean; draft: RoundupDraft }> {
   const client = getSupabaseAdminClient();
   if (!client) return { persisted: false, draft };
 
@@ -156,7 +108,6 @@ export async function upsertWeeklyPreviewDraft(
     matchday: draft.matchday,
     club_abbr: draft.club,
     status: draft.status,
-    scheduled_for: draft.scheduledFor,
     generated_at: new Date(draft.generatedAt).toISOString(),
     data_hash: draft.dossier.dataHash,
     markdown: draft.markdown,
@@ -172,7 +123,7 @@ export async function upsertWeeklyPreviewDraft(
   });
 
   if (error) {
-    console.error('[weekly-preview] upsert failed:', error.message);
+    console.error('[weekly-roundup] upsert failed:', error.message);
     return { persisted: false, draft };
   }
 

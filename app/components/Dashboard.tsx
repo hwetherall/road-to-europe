@@ -760,6 +760,12 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
             >
               Weekly Preview
             </a>
+            <a
+              href="/weekly-roundup"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-400/[0.25] text-[11px] font-bold font-oswald tracking-widest uppercase text-blue-300/60 hover:text-blue-200/90 hover:border-blue-400/[0.4] transition-colors"
+            >
+              Weekly Roundup
+            </a>
           </div>
           <div className="flex items-center gap-3 text-white/65 flex-wrap">
             {primaryCard && primaryOdds !== null && (

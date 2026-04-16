@@ -2,6 +2,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import { getLatestWeeklyRoundupDraft, isWeeklyRoundupConfigured } from '@/lib/weekly-roundup/cache';
+import GenerateRoundupButton from '@/app/weekly-roundup/GenerateRoundupButton';
 
 const SECTION_ACCENTS: Record<string, string> = {
   'the-shift': 'border-l-blue-400/60',
@@ -87,6 +88,12 @@ export default async function WeeklyRoundupPage() {
       <div className="mx-auto max-w-[860px] px-5 py-12">
         {/* Header */}
         <header className="mb-10">
+          <a
+            href="/"
+            className="inline-flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 transition-colors mb-4"
+          >
+            {'\u2190'} Dashboard
+          </a>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="rounded-full border border-blue-400/40 bg-blue-400/10 px-3 py-1 text-[10px] font-bold tracking-[0.16em] uppercase text-blue-200">
               Roundup
@@ -113,6 +120,11 @@ export default async function WeeklyRoundupPage() {
             </p>
           )}
         </header>
+
+        {/* Generate trigger */}
+        <div className="mb-8">
+          <GenerateRoundupButton />
+        </div>
 
         {!cacheEnabled && (
           <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-white/55 text-sm">

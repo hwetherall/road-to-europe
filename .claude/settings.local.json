@@ -20,7 +20,8 @@
       "mcp__claude_ai_Supabase__list_projects",
       "mcp__claude_ai_Supabase__execute_sql",
       "Bash(grep -r \"teamModifications\\\\|modification\\\\|applyChapter\\\\|applyModification\" /c/Users/hweth/OneDrive/Desktop/Personal Projects/road-to-europe --include=\"*.ts\" --include=\"*.tsx\" ! -path \"*/.next/*\")",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(python roundup/espn-api.py)"
     ]
   }
 }

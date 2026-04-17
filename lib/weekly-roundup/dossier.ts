@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { simulateFull } from '@/lib/server-simulation';
 import { Fixture, SimulationResult, Team } from '@/lib/types';
 import { getFixturesData } from '@/lib/live-data';
+import { fetchMatchdayEvents, reconcileScores } from '@/lib/espn';
 import { getWeeklyPreviewByMatchday } from '@/lib/weekly-preview/cache';
 import { WeeklyPreviewPerfectWeekendEntry } from '@/lib/weekly-preview/types';
 import { GameOfWeekCandidate } from '@/lib/weekly-preview/types';
@@ -273,6 +274,32 @@ export async function buildRoundupDossier(matchday: number): Promise<RoundupDoss
   // 4. Update fixture list with actual results
   const updatedFixtures = markFixturesAsFinished(preview.dossier.fixtures, results);
 
+  // 4a. Fetch ESPN match events (scorers, assists, cards) and reconcile scores.
+  // Football-data.org remains the source of truth for scores; ESPN enriches
+  // narrative detail only. Reconciliation surfaces any mismatch as a warning.
+  let espnEvents: Awaited<ReturnType<typeof fetchMatchdayEvents>> = [];
+  try {
+    espnEvents = await fetchMatchdayEvents(matchday, updatedFixtures);
+    const reconciliation = reconcileScores(results, espnEvents);
+    if (reconciliation.mismatched.length > 0) {
+      warnings.push(
+        `ESPN score mismatch on ${reconciliation.mismatched.length} fixture(s): ${reconciliation.mismatched.join('; ')}. Trusting football-data.org.`
+      );
+    }
+    if (reconciliation.missingFromESPN.length > 0) {
+      warnings.push(
+        `${reconciliation.missingFromESPN.length} fixture(s) absent from ESPN: ${reconciliation.missingFromESPN.join('; ')}. Scorers unavailable for these.`
+      );
+    }
+    console.log(
+      `[weekly-roundup] ESPN: ${espnEvents.length} events fetched, ${reconciliation.matched} reconciled, ${reconciliation.mismatched.length} mismatched, ${reconciliation.missingFromESPN.length} missing.`
+    );
+  } catch (error) {
+    warnings.push(
+      `ESPN fetch failed: ${error instanceof Error ? error.message : String(error)}. Roundup will generate without scorer enrichment.`
+    );
+  }
+
   // 5. Run post-round simulation
   const postRoundResults = simulateFull(updatedTeams, updatedFixtures, ROUNDUP_SIM_COUNT);
 
@@ -297,6 +324,30 @@ export async function buildRoundupDossier(matchday: number): Promise<RoundupDoss
   // 9. Extract Newcastle-specific data
   const targetClubResult =
     results.find((r) => r.homeTeam === 'NEW' || r.awayTeam === 'NEW') ?? null;
+
+  // Find Newcastle's next SCHEDULED fixture after this matchday for the
+  // Deep Dive's Looking Ahead section (post-V1B, this must name the fixture).
+  const nextFixture = updatedFixtures
+    .filter(
+      (f) =>
+        f.status === 'SCHEDULED' &&
+        f.matchday > matchday &&
+        (f.homeTeam === 'NEW' || f.awayTeam === 'NEW')
+    )
+    .sort((a, b) => a.matchday - b.matchday || a.date.localeCompare(b.date))[0];
+
+  const targetClubNextFixture = nextFixture
+    ? {
+        fixtureId: nextFixture.id,
+        homeTeam: nextFixture.homeTeam,
+        awayTeam: nextFixture.awayTeam,
+        matchday: nextFixture.matchday,
+        date: nextFixture.date,
+        isHome: nextFixture.homeTeam === 'NEW',
+        opponent: nextFixture.homeTeam === 'NEW' ? nextFixture.awayTeam : nextFixture.homeTeam,
+      }
+    : null;
+
   const preNewcastle = preRoundSnapshot.find((r) => r.team === 'NEW');
   const postNewcastle = postRoundResults.find((r) => r.team === 'NEW');
   const targetClubPreTop7Pct = preNewcastle?.top7Pct ?? 0;
@@ -323,6 +374,7 @@ export async function buildRoundupDossier(matchday: number): Promise<RoundupDoss
 
   // 12. Build previous preview reference
   const topGotwCandidate = preview.dossier.gameOfWeekShortlist[0] ?? null;
+  const matchFocusSection = preview.sections.find((s) => s.sectionId === 'match-focus');
   const previousPreview = {
     matchday: preview.matchday,
     perfectWeekend: preview.dossier.perfectWeekend,
@@ -334,6 +386,7 @@ export async function buildRoundupDossier(matchday: number): Promise<RoundupDoss
     contestSnapshots: preview.dossier.contestSnapshots,
     clubBaselineTop7Pct: preview.dossier.selectedClubBaseline.top7Pct,
     clubFixtureId: preview.dossier.selectedClubFixture?.id ?? null,
+    matchFocusMarkdown: matchFocusSection?.markdown ?? null,
   };
 
   return {
@@ -362,9 +415,12 @@ export async function buildRoundupDossier(matchday: number): Promise<RoundupDoss
 
     resultThatChanged,
     targetClubResult,
+    targetClubNextFixture,
     targetClubPostTop7Pct,
     targetClubPreTop7Pct,
     targetClubDeltaTop7Pp,
+
+    espnEvents,
 
     // Populated by orchestrator after Phase S
     researchBundle: { matchResearch: [], sources: [] },

@@ -1,10 +1,28 @@
 import { executeWebSearchDetailed } from '@/lib/web-search';
+import type { WebSearchExecution } from '@/lib/web-search';
+import { ESPNMatchDetail, formatScorersLine } from '@/lib/espn';
 import { WeeklyPreviewSourceRef } from '@/lib/weekly-preview/types';
 import {
   RoundupDossier,
   RoundupMatchResearch,
   RoundupResearchBundle,
 } from '@/lib/weekly-roundup/types';
+
+const SEARCH_BATCH_SIZE = 4;
+const SEARCH_BATCH_DELAY_MS = 1100;
+
+async function batchedSearch(queries: string[]): Promise<WebSearchExecution[]> {
+  const results: WebSearchExecution[] = [];
+  for (let i = 0; i < queries.length; i += SEARCH_BATCH_SIZE) {
+    const batch = queries.slice(i, i + SEARCH_BATCH_SIZE);
+    const batchResults = await Promise.all(batch.map((q) => executeWebSearchDetailed(q)));
+    results.push(...batchResults);
+    if (i + SEARCH_BATCH_SIZE < queries.length) {
+      await new Promise((resolve) => setTimeout(resolve, SEARCH_BATCH_DELAY_MS));
+    }
+  }
+  return results;
+}
 
 function sourceId(prefix: string, index: number): string {
   return `${prefix}-${index + 1}`;
@@ -101,14 +119,10 @@ export async function buildRoundupResearchBundle(
     }
   }
 
-  // Run all queries in parallel
-  const [tier1Searches, tier2Searches] = await Promise.all([
-    Promise.all(tier1Queries.map((q) => executeWebSearchDetailed(q.query))),
-    Promise.all(tier2Queries.map((q) => executeWebSearchDetailed(q.query))),
-  ]);
-
-  const allSearches = [...tier1Searches, ...tier2Searches];
+  // Run all queries in batched groups (4 parallel, 1.1s gap) to stay under
+  // Serper's 5/sec rate limit. Adds ~Nbatches*1.1s to research phase.
   const allQueries = [...tier1Queries, ...tier2Queries];
+  const allSearches = await batchedSearch(allQueries.map((q) => q.query));
 
   // Build sources
   const sources: WeeklyPreviewSourceRef[] = allSearches.map((search, index) => ({
@@ -135,17 +149,31 @@ export async function buildRoundupResearchBundle(
     fixtureResearch.set(q.fixtureId, existing);
   });
 
+  // ESPN event lookup by team pair. ESPN is authoritative for scorers when
+  // present; web-search is a fallback only when ESPN has no matching event.
+  const espnByPair = new Map<string, ESPNMatchDetail>();
+  for (const event of dossier.espnEvents ?? []) {
+    espnByPair.set(`${event.homeTeam}-${event.awayTeam}`, event);
+  }
+
   // Build RoundupMatchResearch for each fixture
   const matchResearch: RoundupMatchResearch[] = dossier.results.map((result) => {
     const research = fixtureResearch.get(result.fixtureId);
     const combined = research?.summaries.join(' ') ?? '';
+    const espn = espnByPair.get(`${result.homeTeam}-${result.awayTeam}`);
+
+    const espnScorersLine = espn ? formatScorersLine(espn.goals) : '';
+    const scorersVerified = espnScorersLine.length > 0;
 
     return {
       fixtureId: result.fixtureId,
       homeTeam: result.homeTeam,
       awayTeam: result.awayTeam,
       score: `${result.homeGoals}-${result.awayGoals}`,
-      scorers: combined.length > 0 ? clip(combined, 300) : 'scorers not confirmed from search',
+      scorers: scorersVerified ? espnScorersLine : '',
+      scorersVerified,
+      goals: espn?.goals ?? [],
+      redCards: espn?.cards.filter((c) => c.type === 'red') ?? [],
       keyEvent: combined.length > 0 ? clip(combined, 200) : 'no key event found',
       tacticalNote: combined.length > 0 ? clip(combined, 200) : 'no tactical note found',
       managerQuote: combined.length > 0 ? clip(combined, 200) : 'no quote found',

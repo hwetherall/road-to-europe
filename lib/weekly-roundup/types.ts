@@ -1,4 +1,5 @@
 import { SimulationResult, Team } from '@/lib/types';
+import { ESPNCard, ESPNGoal } from '@/lib/espn';
 import {
   WeeklyPreviewContestSnapshot,
   WeeklyPreviewPerfectWeekendEntry,
@@ -6,14 +7,13 @@ import {
 } from '@/lib/weekly-preview/types';
 import { GameOfWeekCandidate } from '@/lib/weekly-preview/types';
 
-export const WEEKLY_ROUNDUP_VERSION = '2026-04-15-v1';
+export const WEEKLY_ROUNDUP_VERSION = '2026-04-16-v1a';
 
 export const WEEKLY_ROUNDUP_SECTION_ORDER = [
   'the-shift',
-  'preview-scorecard',
   'three-races',
+  'perfect-weekend',
   'newcastle-deep-dive',
-  'result-that-changed',
   'rapid-round',
 ] as const;
 
@@ -88,6 +88,9 @@ export interface RoundupMatchResearch {
   awayTeam: string;
   score: string;
   scorers: string;
+  scorersVerified: boolean;
+  goals: ESPNGoal[];
+  redCards: ESPNCard[];
   keyEvent: string;
   tacticalNote: string;
   managerQuote: string;
@@ -136,6 +139,7 @@ export interface RoundupDossier {
     };
     clubBaselineTop7Pct: number;
     clubFixtureId: string | null;
+    matchFocusMarkdown: string | null;
   };
 
   // Perfect weekend grading
@@ -147,9 +151,23 @@ export interface RoundupDossier {
   // Computed
   resultThatChanged: ResultThatChanged;
   targetClubResult: MatchResult | null;
+  targetClubNextFixture: {
+    fixtureId: string;
+    homeTeam: string;
+    awayTeam: string;
+    matchday: number;
+    date: string;
+    isHome: boolean;
+    opponent: string;
+  } | null;
   targetClubPostTop7Pct: number;
   targetClubPreTop7Pct: number;
   targetClubDeltaTop7Pp: number;
+
+  // Raw ESPN event data (scorers, cards). Pipeline-internal — consumed by
+  // research.ts to populate RoundupMatchResearch. NOT passed to writing-agent
+  // prompt slices directly; prompts see the merged scorers through matchResearch.
+  espnEvents: import('@/lib/espn').ESPNMatchDetail[];
 
   // Research (populated by orchestrator after Phase S)
   researchBundle: RoundupResearchBundle;

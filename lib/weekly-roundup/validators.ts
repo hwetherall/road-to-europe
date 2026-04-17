@@ -41,7 +41,7 @@ export function validateRoundupSections(
   }
 
   // Sections requiring source refs
-  const requiredSources = ['newcastle-deep-dive', 'result-that-changed', 'rapid-round'] as const;
+  const requiredSources = ['newcastle-deep-dive', 'rapid-round'] as const;
   for (const sectionId of requiredSources) {
     const section = sections.find((s) => s.sectionId === sectionId);
     if (section && section.sourceRefs.length === 0) {
@@ -58,7 +58,7 @@ export function validateRoundupSingleSection(
     sectionId: id,
     headline: 'placeholder',
     markdown: '',
-    sourceRefs: id === 'newcastle-deep-dive' || id === 'result-that-changed' || id === 'rapid-round'
+    sourceRefs: id === 'newcastle-deep-dive' || id === 'rapid-round'
       ? ['placeholder']
       : [],
     handoffNotes: [],

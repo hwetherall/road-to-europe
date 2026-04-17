@@ -6,19 +6,17 @@ import GenerateRoundupButton from '@/app/weekly-roundup/GenerateRoundupButton';
 
 const SECTION_ACCENTS: Record<string, string> = {
   'the-shift': 'border-l-blue-400/60',
-  'preview-scorecard': 'border-l-amber-400/60',
   'three-races': 'border-l-teal-400/60',
+  'perfect-weekend': 'border-l-amber-400/60',
   'newcastle-deep-dive': 'border-l-white/30',
-  'result-that-changed': 'border-l-emerald-400/60',
   'rapid-round': 'border-l-white/20',
 };
 
 const SECTION_LABELS: Record<string, string> = {
   'the-shift': 'The Shift',
-  'preview-scorecard': 'Preview Scorecard',
   'three-races': 'The Three Races',
+  'perfect-weekend': 'Perfect Weekend',
   'newcastle-deep-dive': 'Newcastle Deep Dive',
-  'result-that-changed': 'The Result That Changed Everything',
   'rapid-round': 'Rapid Round',
 };
 

@@ -143,6 +143,36 @@ export async function getWeeklyPreviewByMatchday(
   return mapRow(data as WeeklyPreviewRow);
 }
 
+export interface WeeklyPreviewListItem {
+  id: string;
+  matchday: number;
+  season: string;
+  generatedAt: number;
+  status: 'draft' | 'published';
+}
+
+export async function listWeeklyPreviews(club = 'NEW'): Promise<WeeklyPreviewListItem[]> {
+  const client = getSupabaseAdminClient();
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from(TABLE_NAME)
+    .select('id, matchday, season, generated_at, status')
+    .eq('club_abbr', club)
+    .order('matchday', { ascending: false });
+
+  if (error || !data) return [];
+  return (data as Array<{ id: string; matchday: number; season: string; generated_at: string; status: 'draft' | 'published' }>).map(
+    (row) => ({
+      id: row.id,
+      matchday: row.matchday,
+      season: row.season,
+      generatedAt: new Date(row.generated_at).getTime(),
+      status: row.status,
+    })
+  );
+}
+
 export async function upsertWeeklyPreviewDraft(
   draft: WeeklyPreviewDraft
 ): Promise<{ persisted: boolean; draft: WeeklyPreviewDraft }> {

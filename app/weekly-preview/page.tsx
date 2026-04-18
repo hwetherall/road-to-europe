@@ -1,7 +1,13 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
-import { getLatestWeeklyPreviewDraft, isWeeklyPreviewConfigured } from '@/lib/weekly-preview/cache';
+import {
+  getLatestWeeklyPreviewDraft,
+  getWeeklyPreviewByMatchday,
+  isWeeklyPreviewConfigured,
+  listWeeklyPreviews,
+} from '@/lib/weekly-preview/cache';
+import GeneratePreviewButton from '@/app/weekly-preview/GeneratePreviewButton';
 
 const SECTION_ACCENTS: Record<string, string> = {
   overview: 'border-l-teal-400/60',
@@ -74,22 +80,46 @@ const markdownComponents: Components = {
   ),
 };
 
-export default async function WeeklyPreviewPage() {
+export default async function WeeklyPreviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ matchday?: string }>;
+}) {
+  const params = await searchParams;
+  const matchdayParam = params.matchday ? parseInt(params.matchday, 10) : null;
+
   const cacheEnabled = isWeeklyPreviewConfigured();
-  const draft = await getLatestWeeklyPreviewDraft('NEW');
+
+  const [draft, archive] = await Promise.all([
+    matchdayParam
+      ? getWeeklyPreviewByMatchday(matchdayParam)
+      : getLatestWeeklyPreviewDraft('NEW'),
+    listWeeklyPreviews('NEW'),
+  ]);
+
+  const isArchiveView = matchdayParam !== null;
 
   return (
     <main className="min-h-screen bg-[#0b0b0b] text-white">
       <div className="mx-auto max-w-[860px] px-5 py-12">
+        {/* Back nav */}
+        <a
+          href="/"
+          className="inline-flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 transition-colors mb-6"
+        >
+          ← Dashboard
+        </a>
+
         {/* Header */}
-        <header className="mb-10">
+        <header className="mb-8">
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-[10px] font-bold tracking-[0.16em] uppercase text-amber-200">
-              Draft
+              Preview
             </span>
             {draft && (
               <span className="text-white/30 text-xs">
-                Generated {new Date(draft.generatedAt).toLocaleString('en-GB', {
+                Generated{' '}
+                {new Date(draft.generatedAt).toLocaleString('en-GB', {
                   day: 'numeric',
                   month: 'long',
                   year: 'numeric',
@@ -109,16 +139,62 @@ export default async function WeeklyPreviewPage() {
           )}
         </header>
 
+        {/* Archive strip */}
+        {archive.length > 0 && (
+          <div className="mb-6">
+            <div className="mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-white/25">
+              Archive
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/weekly-preview"
+                className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                  !isArchiveView
+                    ? 'border-amber-400/50 bg-amber-400/15 text-amber-200'
+                    : 'border-white/10 bg-white/[0.03] text-white/40 hover:text-white/70 hover:border-white/20'
+                }`}
+              >
+                Latest
+              </a>
+              {archive.map((item) => {
+                const isActive = isArchiveView && matchdayParam === item.matchday;
+                return (
+                  <a
+                    key={item.id}
+                    href={`/weekly-preview?matchday=${item.matchday}`}
+                    className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                      isActive
+                        ? 'border-amber-400/50 bg-amber-400/15 text-amber-200'
+                        : 'border-white/10 bg-white/[0.03] text-white/40 hover:text-white/70 hover:border-white/20'
+                    }`}
+                  >
+                    MD {item.matchday}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Generate trigger */}
+        <div className="mb-8">
+          <GeneratePreviewButton />
+        </div>
+
         {!cacheEnabled && (
           <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-white/55 text-sm">
-            Weekly preview storage is not configured. Add <code className="text-teal-300/70">SUPABASE_URL</code> and{' '}
-            <code className="text-teal-300/70">SUPABASE_SERVICE_ROLE_KEY</code> to enable saved drafts.
+            Weekly preview storage is not configured. Add{' '}
+            <code className="text-teal-300/70">SUPABASE_URL</code> and{' '}
+            <code className="text-teal-300/70">SUPABASE_SERVICE_ROLE_KEY</code> to enable saved
+            drafts.
           </div>
         )}
 
         {!draft && cacheEnabled && (
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-white/55 text-sm">
-            No weekly preview draft has been generated yet.
+            {isArchiveView
+              ? `No preview found for Matchday ${matchdayParam}.`
+              : 'No weekly preview has been generated yet. Hit "Generate New Preview" above to create one.'}
           </div>
         )}
 

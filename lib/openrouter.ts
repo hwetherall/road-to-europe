@@ -61,7 +61,7 @@ export async function callOpenRouter(
   } = {}
 ): Promise<OpenRouterMessage> {
   const {
-    model = 'anthropic/claude-opus-4.6',
+    model = 'anthropic/claude-opus-4.7',
     tools,
     maxTokens = 400000,
     responseFormat,

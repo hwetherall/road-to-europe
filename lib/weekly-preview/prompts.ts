@@ -209,6 +209,7 @@ Rules:
 - Do not add new facts or new analysis.
 - Do not change any number or formatted percentage string.
 - Preserve section order, section ids, and all JSON fields (factsUsed, numericClaimIds, sourceRefs, handoffNotes, meta).
+- CRITICAL: NEVER modify or empty the sourceRefs arrays. Check #3 above ("SOURCE REFS IN TEXT") means remove [research-N] patterns from the markdown field only — the sourceRefs JSON array must remain exactly as provided.
 - Output strict JSON as { "sections": WeeklyPreviewSectionArtifact[] }.
 - You MUST output ALL 8 sections in full, even those you did not edit.
 

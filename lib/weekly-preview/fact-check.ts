@@ -37,6 +37,19 @@ import type { WeeklyPreviewSectionArtifact } from '@/lib/weekly-preview/types';
 const EXTRACTION_MODEL = 'google/gemini-3.1-flash-lite-preview';
 const VERIFICATION_MODEL = 'google/gemini-3.1-flash-lite-preview';
 
+function parseJsonPayload<T>(content: string): T {
+  const cleaned = content.trim();
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = (fenced ? fenced[1] : cleaned).trim();
+  try {
+    return JSON.parse(candidate) as T;
+  } catch {
+    const objectOrArray = candidate.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (objectOrArray) return JSON.parse(objectOrArray[0]) as T;
+    throw new SyntaxError(`Unable to parse JSON payload: ${cleaned.slice(0, 200)}`);
+  }
+}
+
 const VERIFICATION_BATCH_SIZE = 5;
 const VERIFICATION_CONCURRENCY = 3;
 
@@ -59,9 +72,7 @@ export async function extractAtomicClaims(
     }
   );
 
-  const parsed = JSON.parse(message.content ?? '{}') as {
-    claims?: ExtractedClaim[];
-  };
+  const parsed = parseJsonPayload<{ claims?: ExtractedClaim[] }>(message.content ?? '{}');
   return parsed.claims ?? [];
 }
 
@@ -85,9 +96,7 @@ export async function verifyClaim(
     }
   );
 
-  const parsed = JSON.parse(message.content ?? '{}') as {
-    results?: VerifiedClaim[];
-  };
+  const parsed = parseJsonPayload<{ results?: VerifiedClaim[] }>(message.content ?? '{}');
   const result = parsed.results?.[0];
 
   if (!result) {
@@ -128,9 +137,7 @@ async function verifyBatch(
     }
   );
 
-  const parsed = JSON.parse(message.content ?? '{}') as {
-    results?: VerifiedClaim[];
-  };
+  const parsed = parseJsonPayload<{ results?: VerifiedClaim[] }>(message.content ?? '{}');
   const results = parsed.results ?? [];
 
   const resultMap = new Map(results.map((r) => [r.claimId, r]));

@@ -166,10 +166,21 @@ export async function generateWeeklyPreviewDraft(input?: {
     const editorPayload = parseJsonPayload<{
       sections?: WeeklyPreviewSectionArtifact[];
     }>(editorMessage.content ?? '{}');
-    const editorSections = editorPayload.sections ?? orderedSections;
+    const rawEditorSections = editorPayload.sections ?? orderedSections;
+
+    // Restore any sourceRefs the editor accidentally cleared — they are metadata,
+    // not prose, and the editor should never empty them.
+    const mergedEditorSections = rawEditorSections.map((editorSection, i) => {
+      const original = orderedSections[i];
+      if (editorSection.sourceRefs.length === 0 && original && original.sourceRefs.length > 0) {
+        return { ...editorSection, sourceRefs: original.sourceRefs };
+      }
+      return editorSection;
+    });
+
     // Validate the editor output before accepting it
-    validateSections(dossier, editorSections);
-    finalSections = editorSections;
+    validateSections(dossier, mergedEditorSections);
+    finalSections = mergedEditorSections;
   } catch (error) {
     console.warn(
       '[weekly-preview] editor output failed validation, falling back to section-agent output:',

@@ -645,7 +645,7 @@ export async function POST(req: NextRequest) {
             ? deepAnalysisContext
             : buildSystemPrompt(mode ?? 'fast', agentCtx);
 
-          const model = mode === 'deep' ? 'anthropic/claude-opus-4.6' : 'x-ai/grok-4.1-fast';
+          const model = mode === 'deep' ? 'anthropic/claude-opus-4.7' : 'x-ai/grok-4.1-fast';
           const MAX_TOOL_ROUNDS = mode === 'deep' ? 8 : 2;
           const toolCallLog: Array<{ id: string; query: string; status: 'complete' | 'error' }> = [];
 

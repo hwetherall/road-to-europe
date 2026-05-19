@@ -1,6 +1,7 @@
 import {
   WEEKLY_ROUNDUP_SECTION_ORDER,
   RoundupDossier,
+  RoundupQaIssue,
   RoundupSectionArtifact,
   WeeklyRoundupSectionId,
 } from '@/lib/weekly-roundup/types';
@@ -373,4 +374,135 @@ Rules:
 
 Sections to edit:
 ${JSON.stringify(input.sections, null, 2)}`;
+}
+
+export function buildRoundupReviewerPrompt(input: {
+  dossier: RoundupDossier;
+  editableSections: RoundupSectionArtifact[];
+  readerFacingMarkdown: string;
+  deterministicIssues: RoundupQaIssue[];
+  retryNote?: string;
+}): string {
+  const resultsSummary = input.dossier.results.map(
+    (r) => `${r.homeTeam} ${r.homeGoals}-${r.awayGoals} ${r.awayTeam}`
+  );
+
+  const probabilitySummary = input.dossier.probabilityShifts
+    .map((shift) => ({
+      team: shift.team,
+      title: {
+        pre: shift.preRound.championPct,
+        post: shift.postRound.championPct,
+        delta: shift.delta.championPct,
+      },
+      top4: {
+        pre: shift.preRound.top4Pct,
+        post: shift.postRound.top4Pct,
+        delta: shift.delta.top4Pct,
+      },
+      top7: {
+        pre: shift.preRound.top7Pct,
+        post: shift.postRound.top7Pct,
+        delta: shift.delta.top7Pct,
+      },
+      survival: {
+        pre: shift.preRound.survivalPct,
+        post: shift.postRound.survivalPct,
+        delta: shift.delta.survivalPct,
+      },
+      avgPoints: {
+        pre: shift.preRound.avgPoints,
+        post: shift.postRound.avgPoints,
+        delta: shift.delta.avgPoints,
+      },
+    }));
+
+  const perfectWeekendSummary = {
+    hitRate: input.dossier.perfectWeekendHitRate,
+    actualCorrect: input.dossier.perfectWeekendActualCorrect,
+    total: input.dossier.perfectWeekendTotal,
+    maxPossibleSwingPp: input.dossier.previousPreview.perfectWeekendCumulativeDeltaPp,
+    targetClubActualSwingPp: input.dossier.targetClubDeltaTop7Pp,
+    grades: input.dossier.perfectWeekendGrades,
+  };
+
+  return `You are KeepWatch's final Weekly Roundup QA reviewer.
+
+Your job is to produce the final polished report and a structured audit log of every issue you found. You are not writing a new report from scratch. Make the smallest edits needed to remove glaring contradictions, numeric errors, unsupported claims, and confusing logic.
+
+CRITICAL OUTPUT RULES:
+- Output strict JSON only.
+- Return ALL 5 editable sections in full in the original order.
+- Preserve every sectionId exactly.
+- Preserve every sourceRefs array exactly as provided. Do not remove, reorder, add, or rename source refs.
+- Preserve handoffNotes and meta unless a field is objectively wrong.
+- The reader-facing markdown below includes programmatically injected tables. Do NOT copy those tables into returned section markdown. Return only the editable section markdown; the server will inject the authoritative tables again after your review.
+- Do not add new football facts. Only use the canonical data below and the provided text.
+
+CHECK EXPLICITLY FOR:
+1. LOGICAL CONTRADICTIONS: A team cannot be described as favourites/front-runners/leading the race if another team has a higher relevant probability or clearer stated position in the same passage.
+2. NUMERIC CONSISTENCY: Pre/post/delta percentages, point swings, hit rates, and "rounds remaining" must agree across sections and with the canonical data.
+3. TABLE/PROSE CONSISTENCY: If prose interprets a generated table, the interpretation must match the table values.
+4. SCORE AND RESULT ACCURACY: All scores and winners must match the canonical results.
+5. UNSUPPORTED CAUSAL CLAIMS: Do not claim a goal came from a set piece, injury, red card, tactical mechanism, or specific phase unless that is supported by the provided data.
+6. PROBABILITY LANGUAGE: Distinguish "highest chance" from "momentum", "swing", and "narrative". If a lower probability team has momentum, say that without calling them favourites.
+7. INTERNAL LANGUAGE: Remove system terms such as dossier, research bundle, probability shift array, tracked club, or source ids from reader-facing prose.
+
+AUDIT REQUIREMENTS:
+- Log every substantive issue you fix.
+- Include deterministic issues listed below even if you agree and fix them.
+- Use severity "high" for contradictions, wrong scores/results, or materially wrong probability logic.
+- Use severity "medium" for numeric drift, unsupported tactical claims, or repeated misleading framing.
+- Use severity "low" for style/clarity cleanup.
+- For promptTuningNote, write a short note we could paste into future prompts to prevent the same class of mistake.
+
+Canonical matchday context:
+${JSON.stringify(
+  {
+    season: input.dossier.season,
+    matchday: input.dossier.matchday,
+    roundsRemaining: input.dossier.roundsRemaining,
+    results: resultsSummary,
+    probabilityShifts: probabilitySummary,
+    targetClub: input.dossier.club,
+    targetClubTop7: {
+      pre: input.dossier.targetClubPreTop7Pct,
+      post: input.dossier.targetClubPostTop7Pct,
+      delta: input.dossier.targetClubDeltaTop7Pp,
+    },
+    perfectWeekend: perfectWeekendSummary,
+  },
+  null,
+  2
+)}
+
+Deterministic issues already detected:
+${JSON.stringify(input.deterministicIssues, null, 2)}
+
+Reader-facing markdown to review:
+${input.readerFacingMarkdown}
+
+Editable sections to return:
+${JSON.stringify(input.editableSections, null, 2)}
+
+Return JSON in this shape:
+{
+  "sections": [RoundupSectionArtifact],
+  "audit": {
+    "summary": "short plain-English summary",
+    "issues": [
+      {
+        "issueId": "qa-1",
+        "severity": "high",
+        "category": "logical_contradiction",
+        "sectionId": "three-races",
+        "originalExcerpt": "text you fixed",
+        "explanation": "why it was wrong",
+        "correction": "what you changed it to",
+        "promptTuningNote": "future prompt instruction"
+      }
+    ]
+  }
+}
+${input.retryNote ? `\nRetry correction:\n${input.retryNote}` : ''}`;
 }

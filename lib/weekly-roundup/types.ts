@@ -20,6 +20,56 @@ export const WEEKLY_ROUNDUP_SECTION_ORDER = [
 export type WeeklyRoundupSectionId = (typeof WEEKLY_ROUNDUP_SECTION_ORDER)[number];
 export type WeeklyRoundupStatus = 'draft' | 'published';
 
+// ── QA Review ──
+
+export type RoundupQaSeverity = 'low' | 'medium' | 'high';
+
+export type RoundupQaCategory =
+  | 'logical_contradiction'
+  | 'numeric_consistency'
+  | 'score_or_result'
+  | 'unsupported_claim'
+  | 'style_or_clarity'
+  | 'source_or_internal_language'
+  | 'schema_or_validation';
+
+export type RoundupQaSectionRef = WeeklyRoundupSectionId | 'cross-section' | 'full-report';
+
+export interface RoundupQaIssue {
+  issueId: string;
+  severity: RoundupQaSeverity;
+  category: RoundupQaCategory;
+  sectionId: RoundupQaSectionRef;
+  originalExcerpt: string;
+  explanation: string;
+  correction: string;
+  promptTuningNote: string;
+}
+
+export interface RoundupQaSummary {
+  reviewerModel: string;
+  status: 'passed' | 'fixed' | 'fallback';
+  reviewedAt: number;
+  issueCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  deterministicIssueCount: number;
+  acceptedReviewerOutput: boolean;
+  fallbackReason?: string;
+}
+
+export interface RoundupQaAudit {
+  reviewerModel: string;
+  status: RoundupQaSummary['status'];
+  reviewedAt: number;
+  issues: RoundupQaIssue[];
+  deterministicIssues: RoundupQaIssue[];
+  summary: string;
+  acceptedReviewerOutput: boolean;
+  fallbackReason?: string;
+}
+
 // ── Match Results ──
 
 export interface MatchResult {
@@ -210,7 +260,9 @@ export interface RoundupDraft {
     llmCalls: number;
     webSearches: number;
     editorCalls: number;
+    reviewerCalls?: number;
     model: string;
     wallClockTimeMs: number;
+    qa?: RoundupQaSummary;
   };
 }

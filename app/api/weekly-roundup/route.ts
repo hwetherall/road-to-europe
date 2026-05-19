@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { getLatestWeeklyRoundupDraft, isWeeklyRoundupConfigured } from '@/lib/weekly-roundup/cache';
+import { getLatestRoundupGenerationStatus } from '@/lib/weekly-roundup/dossier';
 import { generateWeeklyRoundupDraft } from '@/lib/weekly-roundup/orchestrator';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const cacheEnabled = isWeeklyRoundupConfigured();
-  const draft = await getLatestWeeklyRoundupDraft('NEW');
-  return NextResponse.json({ cacheEnabled, draft });
+  const [draft, generationStatus] = await Promise.all([
+    getLatestWeeklyRoundupDraft('NEW'),
+    getLatestRoundupGenerationStatus(),
+  ]);
+  return NextResponse.json({ cacheEnabled, draft, generationStatus });
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const matchday = body.matchday;
+  const body = (await request.json().catch(() => ({}))) as { matchday?: unknown };
+  let matchday = body.matchday;
 
-  if (!matchday || typeof matchday !== 'number') {
+  if (matchday === undefined) {
+    const status = await getLatestRoundupGenerationStatus();
+    matchday = status.matchday;
+  }
+
+  if (!matchday || typeof matchday !== 'number' || !Number.isInteger(matchday)) {
     return NextResponse.json(
       { error: 'matchday is required and must be a number' },
       { status: 400 }

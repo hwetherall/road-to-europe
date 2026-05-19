@@ -18,6 +18,25 @@ import {
 
 const ROUNDUP_SIM_COUNT = 4000;
 
+export interface RoundupGenerationFixtureStatus {
+  fixtureId: string;
+  homeTeam: string;
+  awayTeam: string;
+  status: Fixture['status'];
+  date: string;
+}
+
+export interface RoundupGenerationStatus {
+  matchday: number | null;
+  source: string;
+  totalFixtures: number;
+  finishedFixtures: number;
+  unfinishedFixtures: RoundupGenerationFixtureStatus[];
+  canGenerate: boolean;
+  reason?: string;
+  warning?: string;
+}
+
 // ── Pure Computation Functions ──
 
 export async function fetchMatchdayResults(matchday: number): Promise<MatchResult[]> {
@@ -33,6 +52,59 @@ export async function fetchMatchdayResults(matchday: number): Promise<MatchResul
       matchday: f.matchday,
       status: f.status as 'FINISHED',
     }));
+}
+
+export async function getLatestRoundupGenerationStatus(): Promise<RoundupGenerationStatus> {
+  const { data: fixtures, source } = await getFixturesData();
+  const finishedMatchdays = [
+    ...new Set(
+      fixtures
+        .filter((fixture) => fixture.status === 'FINISHED')
+        .map((fixture) => fixture.matchday)
+    ),
+  ].sort((a, b) => b - a);
+
+  const matchday = finishedMatchdays[0];
+
+  if (!matchday) {
+    return {
+      matchday: null,
+      source,
+      totalFixtures: 0,
+      finishedFixtures: 0,
+      unfinishedFixtures: [],
+      canGenerate: false,
+      reason: 'No finished fixtures found yet.',
+    };
+  }
+
+  const roundFixtures = fixtures.filter((fixture) => fixture.matchday === matchday);
+  const finishedFixtures = roundFixtures.filter((fixture) => fixture.status === 'FINISHED').length;
+  const unfinishedFixtures = roundFixtures
+    .filter((fixture) => fixture.status !== 'FINISHED')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((fixture) => ({
+      fixtureId: fixture.id,
+      homeTeam: fixture.homeTeam,
+      awayTeam: fixture.awayTeam,
+      status: fixture.status,
+      date: fixture.date,
+    }));
+
+  const warning =
+    unfinishedFixtures.length > 0
+      ? `${unfinishedFixtures.length} of ${roundFixtures.length} matchday ${matchday} fixtures are not finished yet.`
+      : undefined;
+
+  return {
+    matchday,
+    source,
+    totalFixtures: roundFixtures.length,
+    finishedFixtures,
+    unfinishedFixtures,
+    canGenerate: finishedFixtures > 0,
+    warning,
+  };
 }
 
 export function applyResultsToStandings(

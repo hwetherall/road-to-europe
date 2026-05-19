@@ -24,6 +24,8 @@ interface Props {
   selectedTeamResult: DeepAnalysisMetricResult | null;
   sensitivityResults: SensitivityResult[] | null;
   sensitivityMetric: SensitivityMetric;
+  forceRefreshRequestKey?: number;
+  onReportGenerated?: () => void;
   onWhatIfTrigger?: (metric: string, label: string) => void;
 }
 
@@ -72,6 +74,8 @@ export default function DeepAnalysisModal({
   selectedTeamResult,
   sensitivityResults,
   sensitivityMetric,
+  forceRefreshRequestKey = 0,
+  onReportGenerated,
   onWhatIfTrigger,
 }: Props) {
   const [phase, setPhase] = useState<'config' | 'loading' | 'ready' | 'error'>('config');
@@ -86,6 +90,7 @@ export default function DeepAnalysisModal({
   const [loaderVariant, setLoaderVariant] = useState<'cached' | 'fresh'>('fresh');
   const [targetMetric, setTargetMetric] = useState<string>(sensitivityMetric);
   const abortRef = useRef<AbortController | null>(null);
+  const handledForceRefreshKeyRef = useRef(0);
 
   const teamName = teams.find((t) => t.abbr === selectedTeam)?.name ?? selectedTeam;
   const allMetricOptions = useMemo(
@@ -169,7 +174,10 @@ export default function DeepAnalysisModal({
     }
   }, [open, targetMetric, metricOptions, impossibleMetrics, hasMetricOptions]);
 
-  const handleGenerate = useCallback(async (forceRefresh = false) => {
+  const handleGenerate = useCallback(async (
+    forceRefresh = false,
+    requestedTargetMetric: string = targetMetric
+  ) => {
     setError('');
     setWarning('');
     setCacheStatus('');
@@ -179,7 +187,7 @@ export default function DeepAnalysisModal({
 
     const requestPayload = {
       targetTeam: selectedTeam,
-      targetMetric,
+      targetMetric: requestedTargetMetric,
       teams,
       fixtures,
     };
@@ -255,6 +263,7 @@ export default function DeepAnalysisModal({
       setCachedAt(typeof data.cachedAt === 'number' ? data.cachedAt : null);
       setCacheEnabled(typeof data.cacheEnabled === 'boolean' ? data.cacheEnabled : true);
       setPhase('ready');
+      onReportGenerated?.();
       requestAnimationFrame(() => setFadeIn(true));
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return;
@@ -262,7 +271,14 @@ export default function DeepAnalysisModal({
       setError(e instanceof Error ? e.message : 'Unknown error');
       setPhase('error');
     }
-  }, [selectedTeam, targetMetric, teams, fixtures]);
+  }, [selectedTeam, targetMetric, teams, fixtures, onReportGenerated]);
+
+  useEffect(() => {
+    if (!open || forceRefreshRequestKey === 0 || !hasMetricOptions) return;
+    if (handledForceRefreshKeyRef.current === forceRefreshRequestKey) return;
+    handledForceRefreshKeyRef.current = forceRefreshRequestKey;
+    handleGenerate(true, sensitivityMetric);
+  }, [open, forceRefreshRequestKey, hasMetricOptions, handleGenerate, sensitivityMetric]);
 
   // Escape to close
   useEffect(() => {

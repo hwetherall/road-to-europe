@@ -3,10 +3,12 @@ import { vi } from 'vitest';
 
 const getLatestWeeklyPreviewDraft = vi.fn();
 const isWeeklyPreviewConfigured = vi.fn();
+const listWeeklyPreviews = vi.fn();
 
 vi.mock('@/lib/weekly-preview/cache', () => ({
   getLatestWeeklyPreviewDraft,
   isWeeklyPreviewConfigured,
+  listWeeklyPreviews,
 }));
 
 describe('weekly preview page', () => {
@@ -16,11 +18,13 @@ describe('weekly preview page', () => {
 
   it('renders the latest draft content', async () => {
     isWeeklyPreviewConfigured.mockReturnValue(true);
+    listWeeklyPreviews.mockResolvedValue([]);
     getLatestWeeklyPreviewDraft.mockResolvedValue({
       id: 'draft-1',
       generatedAt: Date.now(),
       warnings: ['Warning'],
       sources: [{ id: 'source-1', title: 'Source 1', provider: 'serper' }],
+      metadata: { llmCalls: 1, model: 'test-model' },
       sections: [
         {
           sectionId: 'overview',

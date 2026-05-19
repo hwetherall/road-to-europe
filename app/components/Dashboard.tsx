@@ -26,9 +26,6 @@ import {
   createFixtureLockChapter,
 } from '@/lib/chapters';
 import { readKyleState, writeKyleState } from '@/lib/kyle';
-import TeamSelector from './TeamSelector';
-import QualificationCards from './QualificationCards';
-import PositionHistogram from './PositionHistogram';
 import SensitivityChart from './SensitivityChart';
 import WhatIfPanel from './WhatIfPanel';
 import ScenarioComparison from './ScenarioComparison';
@@ -39,9 +36,11 @@ import LeagueProjections from './LeagueProjections';
 import KyleMiniDashboard from './KyleMiniDashboard';
 import DeepAnalysisModal from './DeepAnalysisModal';
 import WhatIfAnalysis from './WhatIfAnalysis';
+import SignupForm from './SignupForm';
 
 const SIM_COUNT = 10000;
 const SENSITIVITY_SIMS = 1000;
+const REPORT_STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const SENSITIVITY_METRIC_LABELS: Record<SensitivityMetric, string> = {
   championPct: 'title odds',
   top4Pct: 'top-4 odds',
@@ -54,6 +53,21 @@ const SENSITIVITY_METRIC_LABELS: Record<SensitivityMetric, string> = {
 
 interface DashboardProps {
   initialTeam?: string;
+  weeklyReports?: WeeklyReportLink[];
+}
+
+type DashboardFeature = 'lock' | 'chat' | 'report' | 'weekly';
+
+export interface WeeklyReportLink {
+  id: string;
+  kind: 'preview' | 'roundup';
+  label: string;
+  href: string;
+  latestHref: string;
+  matchday: number;
+  season: string;
+  generatedAt: number;
+  status: 'draft' | 'published';
 }
 
 type DeepDivePreviewState = {
@@ -65,7 +79,600 @@ type DeepDivePreviewState = {
   targetMetric: string | null;
 };
 
-export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
+function toOrdinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  if (n % 10 === 1) return `${n}st`;
+  if (n % 10 === 2) return `${n}nd`;
+  if (n % 10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function formatPct(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}%` : '--';
+}
+
+function formatReportDate(value: number): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(value));
+}
+
+function getPositionColor(position: number): string {
+  if (position <= 4) return '#22c55e';
+  if (position === 5) return '#3b82f6';
+  if (position === 6) return '#f97316';
+  if (position === 7) return '#00ccaa';
+  if (position >= 18) return '#ef4444';
+  return 'rgba(255,255,255,0.22)';
+}
+
+function getTeamNarrative(input: {
+  teamName: string;
+  teamContext: TeamContext | null;
+  primaryCard: TeamContext['relevantCards'][number] | null;
+  primaryOdds: number | null;
+}): string {
+  const { teamName, teamContext, primaryCard, primaryOdds } = input;
+  if (!teamContext || !primaryCard || primaryOdds === null) {
+    return `${teamName} season outlook is loading`;
+  }
+
+  const odds = formatPct(primaryOdds);
+  if (primaryCard.key === 'championPct') {
+    return `${teamName} are in the title race - ${odds} title odds`;
+  }
+  if (primaryCard.key === 'top4Pct' || primaryCard.key === 'top5Pct') {
+    return `${teamName} are pushing for Champions League - ${odds} odds`;
+  }
+  if (primaryCard.key === 'top6Pct' || primaryCard.key === 'top7Pct') {
+    return `${teamName} are fighting for European qualification - ${odds} odds`;
+  }
+  if (primaryCard.key === 'relegationPct') {
+    return `${teamName} are battling relegation - ${odds} risk`;
+  }
+  if (teamContext.zone === 'relegation') {
+    return `${teamName} are battling to stay up - ${odds} survival odds`;
+  }
+  return `${teamName} are tracking ${primaryCard.label.toLowerCase()} - ${odds} odds`;
+}
+
+function TeamRail({
+  teams,
+  selectedTeam,
+  onSelectTeam,
+}: {
+  teams: Team[];
+  selectedTeam: string;
+  onSelectTeam: (abbr: string) => void;
+}) {
+  const orderedTeams = [...teams].sort((a, b) => a.name.localeCompare(b.name));
+  const positionByTeam = new Map(teams.map((team, index) => [team.abbr, index + 1]));
+
+  return (
+    <div className="pb-4">
+      <div className="grid grid-cols-10 gap-1.5">
+        {orderedTeams.map((team) => {
+          const isSelected = team.abbr === selectedTeam;
+          const color = getTeamColour(team.abbr);
+          const textColor = getTeamTextColour(team.abbr);
+          const position = positionByTeam.get(team.abbr);
+          return (
+            <button
+              key={team.abbr}
+              type="button"
+              onClick={() => onSelectTeam(team.abbr)}
+              title={`${team.name}${position ? `, ${toOrdinal(position)}` : ''}`}
+              className="h-10 rounded-lg border px-1 text-center transition-transform hover:scale-[1.03] hover:opacity-100"
+              style={{
+                borderColor: isSelected ? color : `${color}55`,
+                background: isSelected
+                  ? `linear-gradient(135deg, ${color}, ${color}88)`
+                  : `linear-gradient(135deg, ${color}33, ${color}14)`,
+                boxShadow: isSelected ? `0 0 0 1px ${color}60, 0 10px 24px ${color}22` : undefined,
+              }}
+            >
+              <span
+                className="block font-oswald text-[10px] font-bold uppercase tracking-[0.08em]"
+                style={{ color: isSelected ? '#ffffff' : textColor }}
+              >
+                {team.abbr}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DashboardHeader({
+  accentColor,
+  selectedTeam,
+  sortedTeams,
+  currentTeam,
+  teamPosition,
+  gamesRemaining,
+  narrative,
+  dataSource,
+  onSelectTeam,
+  shifted,
+}: {
+  accentColor: string;
+  selectedTeam: string;
+  sortedTeams: Team[];
+  currentTeam: Team | undefined;
+  teamPosition: number;
+  gamesRemaining: number;
+  narrative: string;
+  dataSource: string;
+  onSelectTeam: (abbr: string) => void;
+  shifted: boolean;
+}) {
+  const stats = [
+    { label: 'Position', value: teamPosition > 0 ? toOrdinal(teamPosition) : '--', color: accentColor },
+    { label: 'Points', value: currentTeam?.points ?? '--', color: 'rgba(237,237,237,0.78)' },
+    { label: 'Games left', value: gamesRemaining, color: 'rgba(237,237,237,0.78)' },
+  ];
+
+  return (
+    <header
+      className="border-b-2 bg-[#080808] px-4 pt-5 sm:px-6"
+      style={{
+        borderBottomColor: `${accentColor}28`,
+        background: 'linear-gradient(160deg,#050505 0%,#101010 58%,#080808 100%)',
+      }}
+    >
+      <div
+        className="mx-auto max-w-[920px] transition-[margin] duration-300"
+        style={shifted ? { marginRight: '400px' } : undefined}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border font-oswald text-[11px] font-bold text-white"
+              style={{
+                borderColor: `${accentColor}60`,
+                background: `linear-gradient(135deg, ${accentColor}cc, ${accentColor}45)`,
+              }}
+            >
+              {selectedTeam}
+            </div>
+            <div className="min-w-0">
+              <h1 className="m-0 font-oswald text-[24px] font-bold uppercase leading-none tracking-[0.12em]">
+                Keepwatch
+              </h1>
+              <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-white/32">
+                EPL Season Simulator
+              </div>
+            </div>
+          </div>
+
+          <div className="grid shrink-0 grid-cols-3 gap-2">
+            {stats.map((stat) => (
+              <div
+                key={stat.label}
+                className="min-w-[64px] rounded-lg border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-center"
+              >
+                <div className="mb-1 text-[9px] uppercase tracking-[0.14em] text-white/28">
+                  {stat.label}
+                </div>
+                <div className="font-mono text-[17px] font-semibold leading-none" style={{ color: stat.color }}>
+                  {stat.value}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4 text-[12.5px] leading-6 text-white/45">
+          {currentTeam ? (
+            <>
+              <span className="font-semibold" style={{ color: accentColor }}>
+                {currentTeam.name}
+              </span>{' '}
+              <span className="text-white/70">{narrative.replace(`${currentTeam.name} `, '')}</span>
+              {dataSource && <span className="ml-2 text-[10px] text-white/22">Data: {dataSource}</span>}
+            </>
+          ) : (
+            'Loading team data'
+          )}
+        </div>
+
+        <TeamRail teams={sortedTeams} selectedTeam={selectedTeam} onSelectTeam={onSelectTeam} />
+      </div>
+    </header>
+  );
+}
+
+function FeatureStrip({
+  activeFeature,
+  lockedCount,
+  accentColor,
+  reportStatus,
+  weeklyReports,
+  onToggle,
+  shifted,
+}: {
+  activeFeature: DashboardFeature | null;
+  lockedCount: number;
+  accentColor: string;
+  reportStatus: DeepDivePreviewState['status'];
+  weeklyReports: WeeklyReportLink[];
+  onToggle: (feature: DashboardFeature) => void;
+  shifted: boolean;
+}) {
+  const latestPreview = weeklyReports.find((report) => report.kind === 'preview');
+  const latestRoundup = weeklyReports.find((report) => report.kind === 'roundup');
+  const cards = [
+    {
+      id: 'lock' as const,
+      glyph: 'X',
+      label: 'Lock Outcomes',
+      desc: 'Pin match results and watch odds shift as your scenario builds.',
+      status: lockedCount > 0 ? `${lockedCount} locked` : 'No fixtures locked',
+      color: '#f59e0b',
+      alert: lockedCount > 0,
+    },
+    {
+      id: 'chat' as const,
+      glyph: '<>',
+      label: 'AI Scenarios',
+      desc: 'Ask scenario questions and convert the answer into quantified odds.',
+      status: 'Claude-powered',
+      color: accentColor,
+      alert: false,
+    },
+    {
+      id: 'report' as const,
+      glyph: '▤',
+      label: 'Generate Report',
+      desc: 'Deep-dive AI analysis on your team path and swing fixtures.',
+      status:
+        reportStatus === 'ready'
+          ? 'Saved report ready'
+          : reportStatus === 'loading'
+          ? 'Checking cache'
+          : 'Ready to generate',
+      color: '#00ccaa',
+      alert: reportStatus === 'ready',
+    },
+    {
+      id: 'weekly' as const,
+      glyph: '◷',
+      label: 'Weekly',
+      desc: `${latestPreview ? latestPreview.label : 'No preview yet'} · ${
+        latestRoundup ? latestRoundup.label : 'No roundup yet'
+      }`,
+      status: weeklyReports.length > 0 ? `${weeklyReports.length} saved reports` : 'No saved reports',
+      color: '#818cf8',
+      alert: weeklyReports.length > 0,
+    },
+  ];
+
+  return (
+    <section className="border-b border-white/[0.07] bg-[#0c0c0c] px-4 py-3 sm:px-6">
+      <div
+        className="mx-auto grid max-w-[920px] grid-cols-1 gap-2 transition-[margin] duration-300 sm:grid-cols-2 lg:grid-cols-4"
+        style={shifted ? { marginRight: '400px' } : undefined}
+      >
+        {cards.map((card) => {
+          const active = activeFeature === card.id;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              onClick={() => onToggle(card.id)}
+              className="relative min-h-[110px] rounded-lg border p-4 text-left transition-colors"
+              style={{
+                borderColor: active ? `${card.color}65` : 'rgba(255,255,255,0.075)',
+                background: active ? `${card.color}12` : 'rgba(255,255,255,0.018)',
+              }}
+            >
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <span className="font-mono text-[15px]" style={{ color: active ? card.color : 'rgba(237,237,237,0.3)' }}>
+                  {card.glyph}
+                </span>
+                {card.alert && !active && (
+                  <span
+                    className="rounded-full px-2 py-0.5 font-oswald text-[8px] uppercase tracking-[0.12em]"
+                    style={{ background: `${card.color}22`, color: card.color }}
+                  >
+                    New
+                  </span>
+                )}
+              </div>
+              <div
+                className="mb-1 font-oswald text-[12px] font-semibold uppercase tracking-[0.1em]"
+                style={{ color: active ? card.color : 'rgba(237,237,237,0.74)' }}
+              >
+                {card.label}
+              </div>
+              <div className="mb-3 text-[11px] leading-5 text-white/35">{card.desc}</div>
+              <div className="font-mono text-[10px]" style={{ color: active ? card.color : 'rgba(237,237,237,0.28)' }}>
+                {active ? 'active - click to close' : card.status}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function WeeklyReportsPanel({
+  reports,
+  shifted,
+}: {
+  reports: WeeklyReportLink[];
+  shifted: boolean;
+}) {
+  const latest = reports[0] ?? null;
+
+  return (
+    <section className="border-b border-white/[0.07] bg-[#080808] px-4 py-6 sm:px-6">
+      <div
+        className="mx-auto max-w-[920px] transition-[margin] duration-300"
+        style={shifted ? { marginRight: '400px' } : undefined}
+      >
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <div className="font-oswald text-[11px] uppercase tracking-[0.18em] text-white/35">
+              Weekly Reports
+            </div>
+            <div className="mt-1 text-[12px] text-white/28">
+              Previews and roundups generated for Newcastle.
+            </div>
+          </div>
+          {latest && (
+            <a
+              href={latest.latestHref}
+              className="rounded-lg border border-indigo-300/40 bg-indigo-300/15 px-4 py-2 font-oswald text-[11px] font-bold uppercase tracking-[0.14em] text-indigo-100 transition-colors hover:border-indigo-200/70 hover:bg-indigo-300/20"
+            >
+              Open latest
+            </a>
+          )}
+        </div>
+
+        {latest ? (
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)]">
+            <a
+              href={latest.latestHref}
+              className="rounded-lg border border-indigo-300/45 bg-indigo-300/[0.12] p-5 transition-colors hover:border-indigo-200/70 hover:bg-indigo-300/[0.16]"
+            >
+              <div className="mb-3 inline-flex rounded-full bg-indigo-300/20 px-2.5 py-1 font-oswald text-[9px] uppercase tracking-[0.14em] text-indigo-100">
+                Latest recommended
+              </div>
+              <div className="font-oswald text-[24px] font-bold uppercase leading-none text-white">
+                {latest.label}
+              </div>
+              <div className="mt-2 text-[12px] text-white/42">
+                Generated {formatReportDate(latest.generatedAt)} · {latest.season}
+              </div>
+            </a>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {reports.map((report, index) => {
+                const isLatest = index === 0;
+                return (
+                  <a
+                    key={report.id}
+                    href={isLatest ? report.latestHref : report.href}
+                    title={`Generated ${formatReportDate(report.generatedAt)}`}
+                    className={`rounded-lg border px-4 py-3 transition-colors ${
+                      isLatest
+                        ? 'border-indigo-300/35 bg-indigo-300/[0.09] text-indigo-100'
+                        : 'border-white/[0.08] bg-white/[0.02] text-white/58 hover:border-white/[0.18] hover:text-white/82'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-oswald text-[12px] font-semibold uppercase tracking-[0.1em]">
+                        {report.label}
+                      </div>
+                      <div
+                        className={`rounded-full px-2 py-0.5 text-[8px] uppercase tracking-[0.12em] ${
+                          report.kind === 'preview'
+                            ? 'bg-amber-300/12 text-amber-200/80'
+                            : 'bg-blue-300/12 text-blue-200/80'
+                        }`}
+                      >
+                        {report.kind}
+                      </div>
+                    </div>
+                    <div className="mt-1 text-[10px] text-white/28">
+                      Generated {formatReportDate(report.generatedAt)}
+                      {isLatest ? ' · latest' : ''}
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-5 text-[12px] text-white/40">
+            No weekly previews or roundups have been generated yet.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MetricOverview({
+  result,
+  baselineResult,
+  cards,
+  hasActiveChapters,
+  accentColor,
+  numSims,
+}: {
+  result: SimulationResult;
+  baselineResult: SimulationResult | null;
+  cards: TeamContext['relevantCards'];
+  hasActiveChapters: boolean;
+  accentColor: string;
+  numSims: number;
+}) {
+  const primary = cards[0];
+  if (!primary) return null;
+
+  const primaryValue = result[primary.key] as number;
+  const baselineValue = baselineResult ? (baselineResult[primary.key] as number) : primaryValue;
+  const showScenarioDelta = hasActiveChapters && Number.isFinite(baselineValue);
+  const delta = primaryValue - baselineValue;
+  const barColor = showScenarioDelta ? (delta >= 0 ? '#4ade80' : '#f87171') : primary.color;
+  const secondary = cards.slice(1, 4);
+  const dist = result.positionDistribution;
+  const maxDist = Math.max(...dist, 1);
+
+  return (
+    <section className="mb-8">
+      <div
+        className="mb-3 rounded-lg border p-6 sm:p-7"
+        style={{
+          borderColor: `${accentColor}42`,
+          background: `linear-gradient(135deg, ${accentColor}16 0%, rgba(255,255,255,0.018) 72%)`,
+        }}
+      >
+        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="mb-2 font-oswald text-[10px] uppercase tracking-[0.2em] text-white/38">
+              {primary.label} Probability · Primary Metric
+            </div>
+            <div className="flex items-baseline gap-3">
+              {showScenarioDelta && (
+                <span className="font-oswald text-[34px] font-semibold leading-none text-white/24 line-through">
+                  {formatPct(baselineValue)}
+                </span>
+              )}
+              <span className="font-oswald text-[76px] font-bold leading-none sm:text-[84px]" style={{ color: barColor }}>
+                {primaryValue.toFixed(1)}
+                <span className="text-[34px] opacity-70">%</span>
+              </span>
+            </div>
+            <div className="mt-2 text-[12px] leading-5 text-white/42">
+              {primary.sub}
+              {showScenarioDelta && (
+                <span className="ml-3 font-mono text-[11px]" style={{ color: barColor }}>
+                  {delta >= 0 ? '+' : ''}
+                  {delta.toFixed(1)}pp from scenario
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-left md:text-right">
+            <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-white/28">Avg final pts</div>
+            <div className="font-mono text-[30px] font-semibold leading-none text-white/72">
+              {result.avgPoints.toFixed(1)}
+            </div>
+            <div className="mt-1 text-[10px] text-white/22">{numSims.toLocaleString()} sims</div>
+          </div>
+        </div>
+        <div className="mt-5 h-1 overflow-hidden rounded-sm bg-white/[0.08]">
+          <div
+            className="h-full rounded-sm transition-[width] duration-700"
+            style={{ width: `${Math.min(primaryValue, 100)}%`, background: barColor }}
+          />
+        </div>
+      </div>
+
+      {secondary.length > 0 && (
+        <div className={`mb-8 grid grid-cols-1 gap-2 ${secondary.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+          {secondary.map((card) => {
+            const value = result[card.key] as number;
+            return (
+              <div key={card.key} className="rounded-lg border border-white/[0.07] bg-white/[0.018] p-4">
+                <div className="mb-1 font-oswald text-[10px] uppercase tracking-[0.18em] text-white/38">
+                  {card.label}
+                </div>
+                <div className="mb-1 font-oswald text-[34px] font-bold leading-none" style={{ color: card.color }}>
+                  {value.toFixed(1)}
+                  <span className="text-[17px] opacity-70">%</span>
+                </div>
+                <div className="mb-3 text-[11px] text-white/28">{card.sub}</div>
+                <div className="h-[3px] overflow-hidden rounded-sm bg-white/[0.08]">
+                  <div
+                    className="h-full rounded-sm transition-[width] duration-700"
+                    style={{ width: `${Math.min(value, 100)}%`, background: card.color }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div>
+        <div className="mb-1 font-oswald text-[10px] uppercase tracking-[0.2em] text-white/38">
+          Finishing Position Distribution
+        </div>
+        <div className="mb-4 text-[12px] text-white/24">
+          Where this team finishes across {numSims.toLocaleString()} simulated seasons
+        </div>
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.014] px-3 pb-3 pt-4">
+          <div className="flex h-[96px] items-end gap-[3px]">
+            {dist.map((value, index) => (
+              <div key={index} className="flex h-full flex-1 items-end">
+                <div
+                  className="w-full rounded-t-[2px]"
+                  title={`${toOrdinal(index + 1)}: ${((value / numSims) * 100).toFixed(1)}%`}
+                  style={{
+                    height: `${Math.max((value / maxDist) * 100, value > 0 ? 3 : 0)}%`,
+                    background: getPositionColor(index + 1),
+                    opacity: value > 0 ? 0.78 : 0.08,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex gap-[3px]">
+            {dist.map((_, index) => (
+              <div key={index} className="flex-1 text-center font-mono text-[8px] text-white/18">
+                {index + 1}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-white/28">
+            {[
+              ['#22c55e', 'UCL'],
+              ['#3b82f6', 'UCL 5th'],
+              ['#f97316', 'Europa'],
+              ['#00ccaa', 'Conference'],
+              ['rgba(255,255,255,0.22)', 'Mid'],
+              ['#ef4444', 'Relegation'],
+            ].map(([color, label]) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-[2px]" style={{ background: color }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OverviewLoading({ phase, accentColor }: { phase: string; accentColor: string }) {
+  return (
+    <section className="mb-8 rounded-lg border border-white/[0.07] bg-white/[0.018] p-8 text-center">
+      <div
+        className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2"
+        style={{ borderColor: `${accentColor}30`, borderTopColor: accentColor }}
+      />
+      <div className="font-oswald text-[13px] uppercase tracking-[0.14em] text-white/58">
+        {phase || 'Running simulation'}
+      </div>
+      <div className="mt-2 text-[12px] text-white/30">
+        Building the live dashboard from current standings and fixtures.
+      </div>
+    </section>
+  );
+}
+
+export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: DashboardProps) {
   const [teams, setTeams] = useState<Team[]>(HARDCODED_STANDINGS);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string>(initialTeam);
@@ -74,6 +681,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<string>('');
   const [dataSource, setDataSource] = useState<string>('');
+  const [activeFeature, setActiveFeature] = useState<DashboardFeature | null>(null);
 
   // What-If state
   const [whatIfActive, setWhatIfActive] = useState(false);
@@ -91,6 +699,8 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
   // Deep Analysis modal state
   const [deepAnalysisOpen, setDeepAnalysisOpen] = useState(false);
+  const [deepAnalysisForceRefreshKey, setDeepAnalysisForceRefreshKey] = useState(0);
+  const [deepDivePreviewRefreshKey, setDeepDivePreviewRefreshKey] = useState(0);
 
   // What-If Analysis modal state
   const [whatIfOpen, setWhatIfOpen] = useState(false);
@@ -109,6 +719,11 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   // Modified simulation results (with chapters applied)
   const [modifiedSimResults, setModifiedSimResults] = useState<SimulationResult[] | null>(null);
   const chapterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sortedWeeklyReports = useMemo(
+    () => [...weeklyReports].sort((a, b) => b.generatedAt - a.generatedAt),
+    [weeklyReports]
+  );
 
   const allFixtures = useMemo(() => {
     if (fixtures.length > 0) return fixtures;
@@ -179,6 +794,11 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const handleSelectTeam = useCallback((abbr: string) => {
     setSelectedTeam(abbr);
     setMetricOverride(null); // Reset to auto-pick for new team
+    setActiveFeature(null);
+    setWhatIfActive(false);
+    setSidebarOpen(false);
+    setKyleMode(false);
+    writeKyleState(false);
     const url = new URL(window.location.href);
     url.searchParams.set('team', abbr);
     window.history.replaceState({}, '', url.toString());
@@ -410,6 +1030,21 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     setModifiedSimResults(null);
   }, []);
 
+  // Helper to generate lock title on update
+  const getFixtureLockTitle = useCallback(
+    (fixtureId: string, result: 'home' | 'draw' | 'away') => {
+      const fixture = allFixtures.find((f) => f.id === fixtureId);
+      if (!fixture) return 'Unknown fixture';
+      const resultLabels = {
+        home: `${fixture.homeTeam} win`,
+        draw: 'Draw',
+        away: `${fixture.awayTeam} win`,
+      };
+      return `${fixture.homeTeam} vs ${fixture.awayTeam}: ${resultLabels[result]}`;
+    },
+    [allFixtures]
+  );
+
   // What-If lock handler — creates/updates/removes chapters
   const handleToggleLock = useCallback(
     (fixtureId: string, result: 'home' | 'draw' | 'away') => {
@@ -445,22 +1080,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         setScenarioState((prev) => addChapter(prev, chapter));
       }
     },
-    [chapters, allFixtures]
-  );
-
-  // Helper to generate lock title on update
-  const getFixtureLockTitle = useCallback(
-    (fixtureId: string, result: 'home' | 'draw' | 'away') => {
-      const fixture = allFixtures.find((f) => f.id === fixtureId);
-      if (!fixture) return 'Unknown fixture';
-      const resultLabels = {
-        home: `${fixture.homeTeam} win`,
-        draw: 'Draw',
-        away: `${fixture.awayTeam} win`,
-      };
-      return `${fixture.homeTeam} vs ${fixture.awayTeam}: ${resultLabels[result]}`;
-    },
-    [allFixtures]
+    [chapters, allFixtures, getFixtureLockTitle]
   );
 
   const handleResetLocks = useCallback(() => {
@@ -471,24 +1091,17 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     }));
   }, []);
 
-  // Kyle mode handlers
-  const handleKyleToggle = useCallback(() => {
-    setKyleMode((prev) => {
-      const next = !prev;
-      writeKyleState(next);
-      if (next && !sidebarOpen) setSidebarOpen(true);
-      return next;
-    });
-  }, [sidebarOpen]);
-
   const handleChatClose = useCallback(() => {
     setSidebarOpen(false);
     setKyleMode(false);
+    setActiveFeature((feature) => (feature === 'chat' ? null : feature));
     writeKyleState(false);
   }, []);
 
   const handleExitKyleMode = useCallback(() => {
+    setSidebarOpen(false);
     setKyleMode(false);
+    setActiveFeature((feature) => (feature === 'chat' ? null : feature));
     writeKyleState(false);
   }, []);
 
@@ -531,17 +1144,19 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
   const primaryCard = teamContext?.relevantCards[0] ?? null;
   const primaryOdds =
     displayResult && primaryCard ? (displayResult[primaryCard.key] as number) : null;
+  const lockedCount = Object.keys(locks).length;
+  const teamNarrative = getTeamNarrative({
+    teamName: currentTeam?.name ?? selectedTeam,
+    teamContext,
+    primaryCard,
+    primaryOdds,
+  });
+  const shiftForSidebar = sidebarOpen && !kyleActive;
 
-  const currentModeLabel = (() => {
-    if (kyleActive) return 'Focus Chat';
-    if (whatIfActive && sidebarOpen) return 'Match Outcomes + Chat';
-    if (whatIfActive) return 'Match Outcomes';
-    if (sidebarOpen) return 'Chat Assistant';
-    return 'Baseline View';
-  })();
   const inBaselineView = !kyleActive && !whatIfActive && !sidebarOpen;
 
   const handleReturnToBaseline = useCallback(() => {
+    setActiveFeature(null);
     setWhatIfActive(false);
     if (sidebarOpen) {
       handleChatClose();
@@ -552,6 +1167,44 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
     noteFirstInteraction();
     runSimulation();
   }, [noteFirstInteraction, runSimulation]);
+
+  const handleFeatureToggle = useCallback(
+    (feature: DashboardFeature) => {
+      noteFirstInteraction();
+
+      const nextFeature = activeFeature === feature ? null : feature;
+      setActiveFeature(nextFeature);
+      setWhatIfActive(nextFeature === 'lock');
+
+      if (nextFeature === 'chat') {
+        setSidebarOpen(true);
+        setKyleMode(true);
+        writeKyleState(true);
+      } else if (activeFeature === 'chat' || feature === 'chat') {
+        setSidebarOpen(false);
+        setKyleMode(false);
+        writeKyleState(false);
+      }
+
+      if (nextFeature === 'report') {
+        setDeepAnalysisOpen(true);
+      } else if (activeFeature === 'report' || feature === 'report') {
+        setDeepAnalysisOpen(false);
+      }
+    },
+    [activeFeature, noteFirstInteraction]
+  );
+
+  const isDeepDivePreviewStale =
+    deepDivePreview.status === 'ready' &&
+    deepDivePreview.cachedAt !== null &&
+    Date.now() - deepDivePreview.cachedAt >= REPORT_STALE_AFTER_MS;
+
+  const handleRegenerateStaleReport = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setDeepAnalysisOpen(true);
+    setDeepAnalysisForceRefreshKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     try {
@@ -636,7 +1289,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
 
     fetchDeepDivePreview();
     return () => controller.abort();
-  }, [simResults, selectedTeam, sensitivityMetric, teams, allFixtures]);
+  }, [simResults, selectedTeam, sensitivityMetric, teams, allFixtures, deepDivePreviewRefreshKey]);
 
   return (
     <div
@@ -644,147 +1297,32 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         kyleActive ? 'h-screen overflow-hidden flex flex-col' : 'min-h-screen'
       }`}
     >
-      {/* Header */}
-      <div
-        className="border-b-2 px-6 py-8 relative overflow-hidden"
-        style={{
-          background: `linear-gradient(135deg, #000 0%, #1a1a1a 50%, #000 100%)`,
-          borderBottomColor: `${accentColor}30`,
-        }}
-      >
-        <div
-          className="absolute -top-10 -right-10 w-[200px] h-[200px]"
-          style={{
-            background: `radial-gradient(circle, ${accentColor}15 0%, transparent 70%)`,
-          }}
-        />
-        <div className="max-w-[900px] mx-auto" style={sidebarOpen && !kyleActive ? { marginRight: '400px' } : undefined}>
-          <div className="flex items-center gap-3 mb-1.5">
-            <div
-              className="w-10 h-10 rounded-lg border-2 flex items-center justify-center font-oswald font-bold text-xs"
-              style={{
-                borderColor: `${accentColor}60`,
-                background: `linear-gradient(135deg, ${accentColor}cc, ${accentColor}40)`,
-                color: '#fff',
-              }}
-            >
-              {selectedTeam}
-            </div>
-            <div>
-              <h1 className="font-oswald text-[22px] font-bold tracking-wider uppercase m-0">
-                Keepwatch
-              </h1>
-              <div className="text-[11px] text-white/40 tracking-[0.15em] uppercase">
-                EPL Season Simulator
-              </div>
-            </div>
-          </div>
+      <DashboardHeader
+        accentColor={accentColor}
+        selectedTeam={selectedTeam}
+        sortedTeams={sortedTeams}
+        currentTeam={currentTeam}
+        teamPosition={teamPosition}
+        gamesRemaining={gamesRemaining}
+        narrative={teamNarrative}
+        dataSource={dataSource}
+        onSelectTeam={handleSelectTeam}
+        shifted={shiftForSidebar}
+      />
 
-          <TeamSelector
-            teams={teams}
-            selectedTeam={selectedTeam}
-            onSelectTeam={handleSelectTeam}
-          />
+      <FeatureStrip
+        activeFeature={activeFeature}
+        lockedCount={lockedCount}
+        accentColor={accentColor}
+        reportStatus={deepDivePreview.status}
+        weeklyReports={sortedWeeklyReports}
+        onToggle={handleFeatureToggle}
+        shifted={shiftForSidebar}
+      />
 
-          {currentTeam && (
-            <div className="flex gap-5 mt-4 text-[13px] flex-wrap">
-              <span className="text-white/50">
-                <span style={{ color: textColor }} className="font-semibold">{currentTeam.name}</span>
-              </span>
-              <span className="text-white/50">
-                Position:{' '}
-                <span className="text-white font-semibold">{teamPosition}{teamPosition === 1 ? 'st' : teamPosition === 2 ? 'nd' : teamPosition === 3 ? 'rd' : 'th'}</span>
-              </span>
-              <span className="text-white/50">
-                Points:{' '}
-                <span className="text-white font-semibold">{currentTeam.points}</span>
-              </span>
-              <span className="text-white/50">
-                GD:{' '}
-                <span className="text-white font-semibold">
-                  {currentTeam.goalDifference > 0 ? '+' : ''}
-                  {currentTeam.goalDifference}
-                </span>
-              </span>
-              <span className="text-white/50">
-                Remaining:{' '}
-                <span className="text-white font-semibold">{gamesRemaining} games</span>
-              </span>
-              {dataSource && (
-                <span className="text-white/30 text-[11px]">
-                  Data: {dataSource}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="border-b border-white/[0.06] bg-[#0b0b0b]">
-        <div className="max-w-[900px] mx-auto px-4 py-3 flex items-center justify-between gap-4 flex-wrap text-[12px]" style={sidebarOpen && !kyleActive ? { marginRight: '400px' } : undefined}>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePrimaryRun}
-              disabled={running}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold font-oswald tracking-widest uppercase transition-all ${
-                running
-                  ? 'bg-white/[0.05] text-white/40 cursor-wait'
-                  : 'bg-gradient-to-br from-teal-500 to-teal-700 text-white hover:from-teal-400 hover:to-teal-600 cursor-pointer'
-              }`}
-            >
-              {running ? (
-                <>
-                  <div
-                    className="w-3 h-3 border-[1.5px] rounded-full animate-spin"
-                    style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'rgba(255,255,255,0.7)' }}
-                  />
-                  Simulating...
-                </>
-              ) : (
-                <>{'\u21BB'} Re-run</>
-              )}
-            </button>
-            {!inBaselineView && (
-              <button
-                type="button"
-                onClick={handleReturnToBaseline}
-                className="px-2.5 py-1.5 rounded border border-white/[0.16] text-[11px] text-white/60 hover:text-white/90 hover:border-white/[0.3] transition-colors cursor-pointer"
-              >
-                Reset view
-              </button>
-            )}
-            <a
-              href="/weekly-preview"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.16] text-[11px] font-bold font-oswald tracking-widest uppercase text-white/60 hover:text-white/90 hover:border-white/[0.3] transition-colors"
-            >
-              Weekly Preview
-            </a>
-            <a
-              href="/weekly-roundup"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-400/[0.25] text-[11px] font-bold font-oswald tracking-widest uppercase text-blue-300/60 hover:text-blue-200/90 hover:border-blue-400/[0.4] transition-colors"
-            >
-              Weekly Roundup
-            </a>
-          </div>
-          <div className="flex items-center gap-3 text-white/65 flex-wrap">
-            {primaryCard && primaryOdds !== null && (
-              <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
-                <span className="text-white/40">{primaryCard.label}</span>
-                <span className="font-semibold text-white/95">{primaryOdds.toFixed(1)}%</span>
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
-              <span className="text-white/40">Remaining</span>
-              <span className="font-semibold text-white/95">{gamesRemaining}</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1">
-              <span className="text-white/40">Sims</span>
-              <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()}</span>
-            </span>
-          </div>
-        </div>
-      </div>
+      {activeFeature === 'weekly' && (
+        <WeeklyReportsPanel reports={sortedWeeklyReports} shifted={shiftForSidebar} />
+      )}
 
       {/* Content area with sidebar */}
       <div className={`flex ${kyleActive ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
@@ -809,97 +1347,45 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         {/* Main content — hidden in Kyle mode */}
         <div
           className={`transition-all duration-300 ${kyleActive ? 'hidden' : 'flex-1'}`}
-          style={sidebarOpen && !kyleActive ? { marginRight: '380px' } : undefined}
+          style={shiftForSidebar ? { marginRight: '380px' } : undefined}
         >
-          <div className="max-w-[900px] mx-auto px-4 py-6">
-            {showQuickStart && (
-              <div className="mb-6 rounded-xl border border-teal-400/30 bg-teal-400/[0.07] p-4">
-                <div className="font-oswald text-[13px] tracking-[0.14em] uppercase text-teal-200/90 mb-2">
-                  Welcome to Keepwatch
-                </div>
-                <div className="text-[12.5px] text-white/65 leading-5 mb-1">
-                  We&apos;ve simulated {SIM_COUNT.toLocaleString()} seasons using live standings and bookmaker odds.
-                  Your team&apos;s qualification probabilities are below.
-                </div>
-                <div className="text-[12px] text-white/45 leading-5 mb-3">
-                  <strong className="text-white/60">How to use:</strong>{' '}
-                  Scroll to explore the odds &rarr; Lock match outcomes to test scenarios &rarr; Generate a detailed report for deeper analysis.
-                </div>
-                <button
-                  type="button"
-                  onClick={dismissQuickStart}
-                  className="px-3 py-1.5 rounded-lg text-[11px] text-white/50 border border-white/[0.15] hover:text-white/75 hover:border-white/[0.28] transition-colors cursor-pointer"
-                >
-                  Got it
-                </button>
-              </div>
-            )}
-
-            {/* Action bar */}
-            <div className="flex items-center gap-3 mb-7 flex-wrap">
-              <button
-                onClick={() => {
-                  noteFirstInteraction();
-                  setWhatIfActive(!whatIfActive);
-                }}
-                className={`px-5 py-3 rounded-lg text-[13px] font-bold font-oswald tracking-widest uppercase transition-all border cursor-pointer ${
-                  whatIfActive
-                    ? 'text-white border-amber-500/50'
-                    : 'bg-transparent text-white/55 border-white/[0.12] hover:border-white/20 hover:text-white/70'
-                }`}
-                style={
-                  whatIfActive
-                    ? { background: 'rgba(245,158,11,0.15)' }
-                    : undefined
-                }
-                title="Lock match results and see how they change your odds"
-              >
-                {whatIfActive ? 'Exit Match Outcomes' : 'Lock Match Outcomes'}
-              </button>
-              <button
-                onClick={() => {
-                  noteFirstInteraction();
-                  setDeepAnalysisOpen(true);
-                }}
-                className="px-5 py-3 rounded-lg text-[13px] font-bold font-oswald tracking-widest uppercase transition-all border-none cursor-pointer bg-gradient-to-br from-teal-500 to-teal-700 text-white hover:from-teal-400 hover:to-teal-600 flex items-center gap-2"
-                title="Generate an AI-powered detailed analysis report"
-              >
-                <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
-                  <path d="M3 2.5h9M3 5.5h9M3 8.5h5M3 11.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                </svg>
-                {deepDivePreview.status === 'ready' ? 'View Report' : 'Generate Report'}
-              </button>
-              <button
-                onClick={() => {
-                  noteFirstInteraction();
-                  if (sidebarOpen) {
-                    handleChatClose();
-                  } else {
-                    setSidebarOpen(true);
-                  }
-                }}
-                className={`px-4 py-2.5 rounded-lg text-[12px] font-oswald tracking-wider uppercase transition-all border cursor-pointer relative ${
-                  sidebarOpen
-                    ? 'text-white font-bold'
-                    : 'bg-transparent text-white/40 border-white/[0.08] hover:border-white/15 hover:text-white/55'
-                }`}
-                style={
-                  sidebarOpen
-                    ? { background: `${accentColor}20`, borderColor: `${accentColor}40` }
-                    : undefined
-                }
-                title="Open AI chat to explore scenarios in conversation"
-              >
-                Chat
-                {chapters.length > 0 && !sidebarOpen && (
-                  <span
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center text-white"
-                    style={{ background: accentColor }}
-                  >
-                    {chapters.length}
+          <div className="max-w-[920px] mx-auto px-4 py-7">
+            <div className="mb-6 flex items-center justify-between gap-3 border-b border-white/[0.06] pb-4 text-[12px]">
+              <div className="flex flex-wrap items-center gap-2">
+                {primaryCard && primaryOdds !== null && (
+                  <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1 text-white/65">
+                    <span className="text-white/35">{primaryCard.label}</span>
+                    <span className="font-semibold text-white/90">{primaryOdds.toFixed(1)}%</span>
                   </span>
                 )}
+                <span className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2.5 py-1 text-white/65">
+                  <span className="text-white/35">Sims</span>
+                  <span className="font-semibold text-white/90">{SIM_COUNT.toLocaleString()}</span>
+                </span>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={handlePrimaryRun}
+                disabled={running}
+                className={`rounded-lg px-3 py-1.5 font-oswald text-[11px] font-bold uppercase tracking-[0.14em] transition-colors ${
+                  running
+                    ? 'cursor-wait bg-white/[0.05] text-white/35'
+                    : 'cursor-pointer bg-teal-500/85 text-white hover:bg-teal-400/90'
+                }`}
+              >
+                {running ? 'Simulating' : 'Re-run'}
               </button>
+              {!inBaselineView && (
+              <button
+                  type="button"
+                  onClick={handleReturnToBaseline}
+                  className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] text-white/50 transition-colors hover:border-white/[0.24] hover:text-white/75"
+                >
+                  Reset View
+              </button>
+              )}
+              </div>
             </div>
 
             {/* Report preview (only shown when a cached report exists) */}
@@ -918,18 +1404,30 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                       {deepDivePreview.keyScenario || deepDivePreview.summary}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setDeepAnalysisOpen(true); }}
-                    className="shrink-0 self-center px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
-                  >
-                    View Report
-                  </button>
+                  <div className="shrink-0 self-center flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setDeepAnalysisOpen(true); }}
+                      className="px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-white bg-gradient-to-br from-teal-500 to-teal-700 hover:from-teal-400 hover:to-teal-600 transition-all cursor-pointer"
+                    >
+                      View Report
+                    </button>
+                    {isDeepDivePreviewStale && (
+                      <button
+                        type="button"
+                        onClick={handleRegenerateStaleReport}
+                        className="px-3 py-1.5 rounded-lg text-[10px] font-bold font-oswald tracking-[0.12em] uppercase text-amber-100 border border-amber-300/30 bg-amber-300/10 hover:bg-amber-300/20 hover:border-amber-300/45 transition-colors cursor-pointer"
+                        title="This saved report is more than 7 days old"
+                      >
+                        Regenerate Report
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
-            {running && phase && (
+            {running && phase && displayResult && (
               <div className="mb-6 text-sm flex items-center gap-2" style={{ color: `${textColor}cc` }}>
                 <div
                   className="w-4 h-4 border-2 rounded-full animate-spin"
@@ -937,6 +1435,19 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                 />
                 {phase}
               </div>
+            )}
+
+            {displayResult && teamContext ? (
+              <MetricOverview
+                result={displayResult}
+                baselineResult={baselineTeamResult}
+                cards={teamContext.relevantCards}
+                hasActiveChapters={hasActiveChapters}
+                accentColor={accentColor}
+                numSims={SIM_COUNT}
+              />
+            ) : (
+              <OverviewLoading phase={phase} accentColor={accentColor} />
             )}
 
             {/* Scenario Comparison Strip */}
@@ -967,20 +1478,6 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                   numSims={SIM_COUNT}
                 />
               </div>
-            )}
-
-            {/* Qualification Cards */}
-            {displayResult && teamContext && (
-              <QualificationCards result={displayResult} cards={teamContext.relevantCards} />
-            )}
-
-            {/* Position Histogram */}
-            {displayResult && (
-              <PositionHistogram
-                result={displayResult}
-                accentColor={accentColor}
-                numSims={SIM_COUNT}
-              />
             )}
 
             {/* Sensitivity Chart */}
@@ -1017,11 +1514,13 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
                     <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
                       <path d="M3 2.5h9M3 5.5h9M3 8.5h5M3 11.5h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                     </svg>
-                    Generate Report
-                  </button>
-                </div>
-              </div>
-            )}
+                Generate Report
+              </button>
+            </div>
+          </div>
+        )}
+
+            <SignupForm />
 
             {/* League Projections */}
             {simResults && (
@@ -1072,7 +1571,7 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
               <br />
               <strong className="text-white/50">What-If mode</strong> lets you manually lock
               fixture outcomes and see how they affect the selected team&apos;s odds in real
-              time. Lock any fixture — not just the selected team&apos;s — since a
+              time. Lock any fixture - not just the selected team&apos;s - since a
               rival&apos;s loss can matter more than your team&apos;s win.
               <br />
               <br />
@@ -1113,7 +1612,10 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
       {/* Deep Analysis Modal */}
       <DeepAnalysisModal
         open={deepAnalysisOpen}
-        onClose={() => setDeepAnalysisOpen(false)}
+        onClose={() => {
+          setDeepAnalysisOpen(false);
+          setActiveFeature((feature) => (feature === 'report' ? null : feature));
+        }}
         accentColor={accentColor}
         textAccentColor={textColor}
         selectedTeam={selectedTeam}
@@ -1122,6 +1624,8 @@ export default function Dashboard({ initialTeam = 'NEW' }: DashboardProps) {
         selectedTeamResult={baselineTeamResult}
         sensitivityResults={sensitivityResults}
         sensitivityMetric={sensitivityMetric}
+        forceRefreshRequestKey={deepAnalysisForceRefreshKey}
+        onReportGenerated={() => setDeepDivePreviewRefreshKey((key) => key + 1)}
         onWhatIfTrigger={(metric, label) => {
           setDeepAnalysisOpen(false);
           setWhatIfTarget({ metric: metric as keyof SimulationResult, label });

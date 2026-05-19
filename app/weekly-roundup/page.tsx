@@ -1,7 +1,14 @@
+import Link from 'next/link';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
-import { getLatestWeeklyRoundupDraft, isWeeklyRoundupConfigured } from '@/lib/weekly-roundup/cache';
+import {
+  getLatestWeeklyRoundupDraft,
+  getWeeklyRoundupByMatchday,
+  isWeeklyRoundupConfigured,
+  listWeeklyRoundups,
+} from '@/lib/weekly-roundup/cache';
+import { getLatestRoundupGenerationStatus } from '@/lib/weekly-roundup/dossier';
 import GenerateRoundupButton from '@/app/weekly-roundup/GenerateRoundupButton';
 
 const SECTION_ACCENTS: Record<string, string> = {
@@ -77,21 +84,37 @@ const markdownComponents: Components = {
   ),
 };
 
-export default async function WeeklyRoundupPage() {
+export default async function WeeklyRoundupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ matchday?: string }>;
+}) {
+  const params = await searchParams;
+  const parsedMatchday = params.matchday ? parseInt(params.matchday, 10) : null;
+  const matchdayParam = Number.isInteger(parsedMatchday) ? parsedMatchday : null;
   const cacheEnabled = isWeeklyRoundupConfigured();
-  const draft = await getLatestWeeklyRoundupDraft('NEW');
+
+  const [draft, archive, generationStatus] = await Promise.all([
+    matchdayParam
+      ? getWeeklyRoundupByMatchday(matchdayParam)
+      : getLatestWeeklyRoundupDraft('NEW'),
+    listWeeklyRoundups('NEW'),
+    getLatestRoundupGenerationStatus(),
+  ]);
+
+  const isArchiveView = matchdayParam !== null;
 
   return (
     <main className="min-h-screen bg-[#0b0b0b] text-white">
       <div className="mx-auto max-w-[860px] px-5 py-12">
         {/* Header */}
         <header className="mb-10">
-          <a
+          <Link
             href="/"
             className="inline-flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 transition-colors mb-4"
           >
             {'\u2190'} Dashboard
-          </a>
+          </Link>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="rounded-full border border-blue-400/40 bg-blue-400/10 px-3 py-1 text-[10px] font-bold tracking-[0.16em] uppercase text-blue-200">
               Roundup
@@ -119,10 +142,48 @@ export default async function WeeklyRoundupPage() {
           )}
         </header>
 
-        {/* Generate trigger */}
-        <div className="mb-8">
-          <GenerateRoundupButton />
-        </div>
+        {/* Report selector */}
+        {(archive.length > 0 || generationStatus.matchday !== null) && (
+          <div className="mb-8 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+            <div className="mb-3 text-[10px] font-bold tracking-[0.16em] uppercase text-white/25">
+              Previous Reports
+            </div>
+            {archive.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/weekly-roundup"
+                  className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                    !isArchiveView
+                      ? 'border-blue-400/50 bg-blue-400/15 text-blue-200'
+                      : 'border-white/10 bg-white/[0.03] text-white/40 hover:text-white/70 hover:border-white/20'
+                  }`}
+                >
+                  Latest
+                </Link>
+                {archive.map((item) => {
+                  const isActive = isArchiveView && matchdayParam === item.matchday;
+                  return (
+                    <Link
+                      key={item.id}
+                      href={`/weekly-roundup?matchday=${item.matchday}`}
+                      className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                        isActive
+                          ? 'border-blue-400/50 bg-blue-400/15 text-blue-200'
+                          : 'border-white/10 bg-white/[0.03] text-white/40 hover:text-white/70 hover:border-white/20'
+                      }`}
+                      title={`Generated ${new Date(item.generatedAt).toLocaleString('en-GB')}`}
+                    >
+                      MD {item.matchday}
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-white/35">No previous roundup reports yet.</p>
+            )}
+            <GenerateRoundupButton status={generationStatus} />
+          </div>
+        )}
 
         {!cacheEnabled && (
           <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-white/55 text-sm">
@@ -135,7 +196,9 @@ export default async function WeeklyRoundupPage() {
 
         {!draft && cacheEnabled && (
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-white/55 text-sm">
-            No weekly roundup draft has been generated yet.
+            {isArchiveView
+              ? `No roundup report found for Matchday ${matchdayParam}.`
+              : 'No weekly roundup report has been generated yet.'}
           </div>
         )}
 

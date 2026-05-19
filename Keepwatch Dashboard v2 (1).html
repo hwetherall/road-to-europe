@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keepwatch — EPL Season Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0a; color: #ededed; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    .hscroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
+    button { font-family: inherit; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes slideDown { from { opacity:0; max-height:0; } to { opacity:1; max-height:2000px; } }
+    @keyframes pulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
+    .fade-up { animation: fadeUp .3s ease forwards; }
+    .thinking { animation: pulse 1.4s ease-in-out infinite; }
+    select option { background: #1a1a1a; }
+    textarea { resize: none; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── TEAMS & STANDINGS ────────────────────────────────────────────────────────
+const TEAMS = [
+  { abbr:'LIV', name:'Liverpool',      pts:72, played:30, won:22, drawn:6,  lost:2,  gf:74, ga:28 },
+  { abbr:'ARS', name:'Arsenal',        pts:67, played:30, won:20, drawn:7,  lost:3,  gf:62, ga:31 },
+  { abbr:'MCI', name:'Man City',       pts:61, played:30, won:18, drawn:7,  lost:5,  gf:58, ga:38 },
+  { abbr:'CHE', name:'Chelsea',        pts:58, played:30, won:17, drawn:7,  lost:6,  gf:55, ga:35 },
+  { abbr:'AVL', name:'Aston Villa',    pts:56, played:30, won:16, drawn:8,  lost:6,  gf:51, ga:38 },
+  { abbr:'NEW', name:'Newcastle',      pts:54, played:30, won:16, drawn:6,  lost:8,  gf:56, ga:38 },
+  { abbr:'TOT', name:'Spurs',          pts:51, played:30, won:15, drawn:6,  lost:9,  gf:52, ga:45 },
+  { abbr:'BHA', name:'Brighton',       pts:47, played:30, won:13, drawn:8,  lost:9,  gf:48, ga:44 },
+  { abbr:'FUL', name:'Fulham',         pts:44, played:30, won:12, drawn:8,  lost:10, gf:44, ga:46 },
+  { abbr:'WOL', name:'Wolves',         pts:41, played:30, won:11, drawn:8,  lost:11, gf:40, ga:48 },
+  { abbr:'WHU', name:'West Ham',       pts:39, played:30, won:10, drawn:9,  lost:11, gf:42, ga:50 },
+  { abbr:'CRY', name:'Crystal Palace', pts:37, played:30, won:10, drawn:7,  lost:13, gf:36, ga:48 },
+  { abbr:'BRE', name:'Brentford',      pts:36, played:30, won:9,  drawn:9,  lost:12, gf:38, ga:50 },
+  { abbr:'NFO', name:'Nottm Forest',   pts:35, played:30, won:9,  drawn:8,  lost:13, gf:33, ga:47 },
+  { abbr:'BOU', name:'Bournemouth',    pts:32, played:30, won:8,  drawn:8,  lost:14, gf:36, ga:52 },
+  { abbr:'EVE', name:'Everton',        pts:30, played:30, won:7,  drawn:9,  lost:14, gf:28, ga:50 },
+  { abbr:'MUN', name:'Man United',     pts:27, played:30, won:6,  drawn:9,  lost:15, gf:30, ga:56 },
+  { abbr:'LEI', name:'Leicester',      pts:25, played:30, won:6,  drawn:7,  lost:17, gf:26, ga:60 },
+  { abbr:'IPS', name:'Ipswich',        pts:22, played:30, won:5,  drawn:7,  lost:18, gf:24, ga:65 },
+  { abbr:'SOU', name:'Southampton',    pts:14, played:30, won:2,  drawn:8,  lost:20, gf:18, ga:72 },
+];
+const SORTED = [...TEAMS].sort((a,b) => (b.pts-a.pts)||((b.gf-b.ga)-(a.gf-a.ga)));
+const COLORS = {
+  LIV:'#E8193C',ARS:'#FF3535',MCI:'#5FBFEE',CHE:'#3A8FE8',
+  AVL:'#7BCCF4',NEW:'#41D9A8',TOT:'#BBBBFF',BHA:'#5A9FE8',
+  FUL:'#EAB84A',WOL:'#FDB913',WHU:'#9B5A7A',CRY:'#5A7ACF',
+  BRE:'#E85050',NFO:'#E85050',BOU:'#E85050',EVE:'#5555DD',
+  MUN:'#DA2121',LEI:'#4A66CC',IPS:'#3A88F0',SOU:'#E84040',
+};
+const SIM = {
+  LIV:{ ch:68.4,t4:97.2,t5:98.8,t6:99.4,eu:99.6,rel:0.0,avg:83.1, dist:[44.2,24.2,14.8,8.6,4.1,2.1,1.1,0.5,0.2,0.1,0,0,0,0,0,0,0,0,0,0] },
+  ARS:{ ch:27.1,t4:91.4,t5:96.2,t6:98.1,eu:98.9,rel:0.0,avg:78.4, dist:[16.1,36.2,22.8,11.4,7.1,3.8,1.8,0.6,0.2,0,0,0,0,0,0,0,0,0,0,0] },
+  MCI:{ ch:4.2, t4:72.1,t5:84.3,t6:91.2,eu:95.1,rel:0.0,avg:73.2, dist:[1.1,9.8,24.1,22.4,15.8,12.2,7.4,4.1,2.2,0.6,0.2,0.1,0,0,0,0,0,0,0,0] },
+  CHE:{ ch:0.4, t4:52.3,t5:68.1,t6:79.8,eu:88.4,rel:0.0,avg:69.4, dist:[0,1.2,8.4,18.2,20.1,18.4,14.2,9.8,5.4,2.8,1.1,0.4,0,0,0,0,0,0,0,0] },
+  AVL:{ ch:0.1, t4:38.4,t5:56.2,t6:71.4,eu:83.1,rel:0.0,avg:67.1, dist:[0,0.2,3.1,10.8,19.4,21.2,17.4,13.2,8.4,4.2,1.6,0.4,0.1,0,0,0,0,0,0,0] },
+  NEW:{ ch:0.0, t4:22.1,t5:38.4,t6:57.8,eu:71.4,rel:0.0,avg:62.8, dist:[0,0,0.4,3.1,14.8,22.4,28.3,14.2,8.7,4.1,2.2,1.1,0.4,0.2,0.1,0,0,0,0,0] },
+  TOT:{ ch:0.0, t4:12.4,t5:26.8,t6:44.1,eu:60.2,rel:0.0,avg:60.1, dist:[0,0,0.1,1.4,6.8,16.4,22.1,20.8,14.4,9.2,5.1,2.4,0.8,0.4,0.1,0,0,0,0,0] },
+  BHA:{ ch:0.0, t4:4.2, t5:10.8,t6:22.1,eu:38.4,rel:0.1,avg:56.2, dist:[0,0,0,0.2,1.4,5.8,11.2,18.4,20.8,16.4,12.1,7.8,4.2,1.4,0.2,0.1,0,0,0,0] },
+  FUL:{ ch:0.0, t4:1.1, t5:4.2, t6:12.8,eu:24.1,rel:0.4,avg:52.4, dist:[0,0,0,0,0.2,1.4,4.8,9.2,15.4,18.8,18.2,14.4,9.8,5.4,2.1,0.4,0.1,0,0,0] },
+  WOL:{ ch:0.0, t4:0.4, t5:1.8, t6:6.4, eu:14.2,rel:1.2,avg:49.8, dist:[0,0,0,0,0,0.4,1.8,5.2,9.8,14.4,16.8,16.4,13.8,10.4,6.8,3.2,0.8,0.2,0,0] },
+  WHU:{ ch:0.0, t4:0.1, t5:0.8, t6:3.2, eu:9.4, rel:3.8,avg:47.2, dist:[0,0,0,0,0,0.1,0.8,2.8,6.4,11.8,15.4,16.8,14.8,12.4,9.2,5.8,2.8,0.8,0.1,0] },
+  CRY:{ ch:0.0, t4:0.0, t5:0.4, t6:1.8, eu:6.2, rel:7.4,avg:45.1, dist:[0,0,0,0,0,0,0.4,1.4,4.2,8.8,13.4,16.2,16.8,14.8,11.4,7.8,3.8,1.4,0.4,0.1] },
+  BRE:{ ch:0.0, t4:0.0, t5:0.2, t6:1.2, eu:4.8, rel:9.2,avg:44.2, dist:[0,0,0,0,0,0,0.2,0.8,3.1,7.4,11.8,15.4,17.2,16.4,13.2,8.8,4.1,1.4,0.2,0] },
+  NFO:{ ch:0.0, t4:0.0, t5:0.1, t6:0.8, eu:3.2, rel:12.1,avg:43.1,dist:[0,0,0,0,0,0,0.1,0.4,2.1,5.8,10.4,14.8,17.4,17.8,14.8,9.4,5.1,1.8,0.3,0] },
+  BOU:{ ch:0.0, t4:0.0, t5:0.0, t6:0.4, eu:1.8, rel:18.4,avg:41.2,dist:[0,0,0,0,0,0,0,0.2,1.1,3.8,7.8,12.4,16.2,17.8,16.4,12.8,7.4,3.4,0.8,0.1] },
+  EVE:{ ch:0.0, t4:0.0, t5:0.0, t6:0.2, eu:1.1, rel:28.4,avg:38.8,dist:[0,0,0,0,0,0,0,0.1,0.4,1.8,4.8,9.2,13.8,16.4,18.2,15.8,11.4,6.2,2.4,0.5] },
+  MUN:{ ch:0.0, t4:0.0, t5:0.0, t6:0.1, eu:0.6, rel:42.1,avg:36.4,dist:[0,0,0,0,0,0,0,0,0.2,0.8,2.8,6.4,10.8,14.4,17.2,18.4,14.8,9.4,4.4,1.4] },
+  LEI:{ ch:0.0, t4:0.0, t5:0.0, t6:0.0, eu:0.2, rel:58.4,avg:33.2,dist:[0,0,0,0,0,0,0,0,0.1,0.4,1.4,3.8,7.2,11.8,15.4,18.8,17.4,13.8,8.1,2.8] },
+  IPS:{ ch:0.0, t4:0.0, t5:0.0, t6:0.0, eu:0.1, rel:74.2,avg:30.1,dist:[0,0,0,0,0,0,0,0,0,0.2,0.6,1.8,4.2,8.4,13.2,17.8,20.1,17.4,12.4,4.9] },
+  SOU:{ ch:0.0, t4:0.0, t5:0.0, t6:0.0, eu:0.0, rel:96.8,avg:22.4,dist:[0,0,0,0,0,0,0,0,0,0,0.1,0.3,0.8,2.1,5.4,11.2,18.4,24.8,28.1,9.8] },
+};
+
+// Upcoming fixtures for lock outcomes (keyed by team abbr)
+function makeFixtures(abbr, pos) {
+  const tname = TEAMS.find(t=>t.abbr===abbr)?.name || abbr;
+  const rivals = SORTED.slice(Math.max(0,pos-3), pos+3).filter(t=>t.abbr!==abbr).slice(0,3);
+  const own = [
+    { id:`${abbr}1`,gw:31,home:abbr,away:'ARS',date:'Apr 5', hD:pos<10?5.8:-4.2,dD:-1.1,aD:pos<10?-8.4:6.8 },
+    { id:`${abbr}2`,gw:32,home:'MCI',away:abbr,date:'Apr 12',hD:pos<10?-7.2:4.4,dD:0.8, aD:pos<10?9.1:-5.8 },
+    { id:`${abbr}3`,gw:33,home:abbr,away:'WOL',date:'Apr 19',hD:pos<17?4.2:-6.1,dD:-0.8,aD:pos<17?-5.4:8.2 },
+    { id:`${abbr}4`,gw:34,home:'AVL',away:abbr,date:'Apr 26',hD:pos<10?-6.4:3.8,dD:0.6, aD:pos<10?7.8:-4.9 },
+    { id:`${abbr}5`,gw:35,home:abbr,away:'BHA',date:'May 3', hD:pos<17?3.8:-5.2,dD:-0.4,aD:pos<17?-4.6:6.8 },
+    { id:`${abbr}6`,gw:36,home:'FUL',away:abbr,date:'May 10',hD:pos<10?-3.1:2.4,dD:0.3, aD:pos<10?4.2:-3.4 },
+    { id:`${abbr}7`,gw:37,home:abbr,away:'CHE',date:'May 17',hD:pos<17?3.2:-4.8,dD:-0.6,aD:pos<17?-4.1:6.1 },
+    { id:`${abbr}8`,gw:38,home:'WHU',away:abbr,date:'May 25',hD:pos<10?-2.4:1.8,dD:0.2, aD:pos<10?3.2:-2.8 },
+  ];
+  const rivalGames = rivals.slice(0,2).map((r,i)=>({
+    id:`riv${abbr}${i}`,gw:31+i,home:r.abbr,away:SORTED[pos+i]?.abbr||'BHA',
+    date:i===0?'Apr 5':'Apr 12',
+    hD:2.8+i,dD:1.2-i*0.4,aD:-3.8-i*0.6,rival:true,
+  }));
+  return [...own, ...rivalGames];
+}
+const FIXTURES = {};
+SORTED.forEach((t,i) => { FIXTURES[t.abbr] = makeFixtures(t.abbr, i); });
+// Override Newcastle with precise data
+FIXTURES['NEW'] = [
+  { id:'n1',gw:31,home:'NEW',away:'ARS',date:'Apr 5', hD:+8.3,dD:-2.1,aD:-14.2 },
+  { id:'n2',gw:32,home:'MCI',away:'NEW',date:'Apr 12',hD:-9.8,dD:+1.2,aD:+12.4 },
+  { id:'n3',gw:33,home:'NEW',away:'WOL',date:'Apr 19',hD:+6.1,dD:-1.2,aD:-7.3 },
+  { id:'n4',gw:34,home:'AVL',away:'NEW',date:'Apr 26',hD:-8.4,dD:+0.8,aD:+9.2 },
+  { id:'n5',gw:35,home:'NEW',away:'BHA',date:'May 3', hD:+4.8,dD:-0.6,aD:-5.4 },
+  { id:'n6',gw:36,home:'FUL',away:'NEW',date:'May 10',hD:-3.2,dD:+0.4,aD:+4.1 },
+  { id:'n7',gw:37,home:'NEW',away:'CHE',date:'May 17',hD:+3.8,dD:-0.8,aD:-4.6 },
+  { id:'n8',gw:38,home:'WHU',away:'NEW',date:'May 25',hD:-2.8,dD:+0.2,aD:+3.4 },
+  { id:'r1',gw:31,home:'TOT',away:'CHE',date:'Apr 5', hD:+5.2,dD:+1.8,aD:-6.1,rival:true },
+  { id:'r2',gw:32,home:'AVL',away:'TOT',date:'Apr 12',hD:+4.8,dD:+2.1,aD:-5.3,rival:true },
+];
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function ordinal(n) {
+  const v=n%100; if(v>=11&&v<=13) return`${n}th`;
+  if(n%10===1) return`${n}st`; if(n%10===2) return`${n}nd`; if(n%10===3) return`${n}rd`; return`${n}th`;
+}
+function getZone(pos) {
+  if(pos<=4)  return{label:'UCL', bg:'rgba(34,197,94,0.07)',  dot:'#22c55e'};
+  if(pos===5) return{label:'UCL+',bg:'rgba(59,130,246,0.07)', dot:'#3b82f6'};
+  if(pos===6) return{label:'UEL', bg:'rgba(249,115,22,0.07)', dot:'#f97316'};
+  if(pos===7) return{label:'UECL',bg:'rgba(0,204,170,0.07)',  dot:'#00ccaa'};
+  if(pos>=18) return{label:'REL', bg:'rgba(239,68,68,0.08)',  dot:'#ef4444'};
+  return null;
+}
+function getHistColor(p) {
+  if(p<=4) return'#22c55e'; if(p===5) return'#3b82f6'; if(p===6) return'#f97316';
+  if(p===7) return'#00ccaa'; if(p>=18) return'#ef4444'; return'rgba(255,255,255,0.2)';
+}
+function getContext(abbr) {
+  const pos=SORTED.findIndex(t=>t.abbr===abbr)+1, sim=SIM[abbr];
+  if(!sim) return null;
+  const name=TEAMS.find(t=>t.abbr===abbr)?.name||abbr;
+  if(pos<=2)  return{narrative:`in the title race — ${sim.ch}% championship probability`,metric:'ch', metricLabel:'Title',    primary:{key:'ch', label:'Title',    sub:'Win the Premier League',  value:sim.ch, color:'#FDB913'},secondary:[{key:'t4',label:'Top 4',  sub:'Champions League',    value:sim.t4,color:'#22c55e'},{key:'t5',label:'Top 5',sub:'UCL expanded',value:sim.t5,color:'#3b82f6'}]};
+  if(pos<=5)  return{narrative:`pushing for Champions League — ${sim.t4}% top-4 probability`, metric:'t4',metricLabel:'Top 4',    primary:{key:'t4', label:'Top 4',   sub:'Champions League entry',  value:sim.t4, color:'#22c55e'},secondary:[{key:'t5',label:'Top 5',sub:'UCL expanded',value:sim.t5,color:'#3b82f6'},{key:'t6',label:'Top 6',sub:'Europa League',value:sim.t6,color:'#f97316'},{key:'eu',label:'European',sub:'Any European place',value:sim.eu,color:'#00ccaa'}]};
+  if(pos<=10) return{narrative:`fighting for European qualification — ${sim.eu}% odds`,        metric:'eu',metricLabel:'European', primary:{key:'eu', label:'European',sub:'Any European place',         value:sim.eu, color:'#00ccaa'},secondary:[{key:'t6',label:'Top 6',sub:'Europa League',value:sim.t6,color:'#f97316'},{key:'t4',label:'Top 4',sub:'Champions League',value:sim.t4,color:'#22c55e'}]};
+  if(pos<=15) return{narrative:`in midtable — ${sim.rel}% relegation risk`,                   metric:'eu',metricLabel:'European', primary:{key:'eu', label:'European',sub:'Long-shot European run',      value:sim.eu, color:'#00ccaa'},secondary:[{key:'rel',label:'Relegation',sub:'Drop to Championship',value:sim.rel,color:'#ef4444'}]};
+  return       {narrative:`battling relegation — ${sim.rel}% chance of going down`,           metric:'rel',metricLabel:'Relegation',primary:{key:'rel',label:'Relegation',sub:'Drop to Championship',   value:sim.rel,color:'#ef4444'},secondary:[{key:'ch',label:'Survival',sub:'Stay in top flight',value:100-sim.rel,color:'#22c55e'}]};
+}
+function tname(abbr) { return TEAMS.find(t=>t.abbr===abbr)?.name||abbr; }
+
+// ─── BASE COMPONENTS ─────────────────────────────────────────────────────────
+function OddsBar({value,color,h=3}) {
+  return <div style={{height:h,borderRadius:2,background:'rgba(255,255,255,0.06)',overflow:'hidden'}}>
+    <div style={{height:'100%',width:`${Math.min(value,100)}%`,background:color,borderRadius:2,transition:'width .7s cubic-bezier(.4,0,.2,1)',opacity:.85}}/>
+  </div>;
+}
+
+// ─── FEATURE STRIP ────────────────────────────────────────────────────────────
+function FeatureStrip({active,onToggle,lockedCount,teamAbbr,accentColor}) {
+  const features = [
+    { id:'lock',   label:'Lock Outcomes',   desc:'Pin match results — watch odds shift as you build your scenario', status: lockedCount>0?`${lockedCount} fixture${lockedCount>1?'s':''} locked`:'No fixtures locked', statusAlert:lockedCount>0, color:'#f59e0b', glyph:'⧖' },
+    { id:'chat',   label:'AI Scenarios',    desc:'Ask "what if Arsenal\'s keeper is injured?" and get quantified odds', status:'Claude-powered',           statusAlert:false,       color:accentColor,  glyph:'◈' },
+    { id:'report', label:'Generate Report', desc:'Deep-dive AI analysis on your team\'s path to qualifying',          status:'Ready to generate',          statusAlert:false,       color:'#00ccaa',    glyph:'▤' },
+    { id:'weekly', label:'Weekly',          desc:'GW31 Preview · GW30 Roundup with results and odds shifts',          status:'GW31 available',             statusAlert:true,        color:'#818cf8',    glyph:'◷' },
+  ];
+  return (
+    <div style={{background:'#0c0c0c',borderBottom:'1px solid rgba(255,255,255,0.07)',padding:'14px 0'}}>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'0 24px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+          {features.map(f=>{
+            const isActive=active===f.id;
+            return <button key={f.id} onClick={()=>onToggle(f.id)} style={{padding:'14px 16px',borderRadius:12,border:`1.5px solid ${isActive?f.color+'55':'rgba(255,255,255,0.07)'}`,background:isActive?`${f.color}11`:'rgba(255,255,255,0.02)',cursor:'pointer',textAlign:'left',transition:'all .18s',position:'relative'}}>
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:8}}>
+                <span style={{fontFamily:'Oswald,sans-serif',fontSize:20,color:isActive?f.color:'rgba(237,237,237,0.3)',lineHeight:1}}>{f.glyph}</span>
+                {f.statusAlert&&!isActive&&<span style={{fontSize:9,background:f.color+'22',color:f.color,padding:'2px 7px',borderRadius:10,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase'}}>{lockedCount>0&&f.id==='lock'?`${lockedCount} locked`:'New'}</span>}
+              </div>
+              <div style={{fontFamily:'Oswald,sans-serif',fontSize:12,letterSpacing:'0.1em',textTransform:'uppercase',color:isActive?f.color:'rgba(237,237,237,0.72)',marginBottom:5,fontWeight:600}}>{f.label}</div>
+              <div style={{fontSize:11,color:'rgba(237,237,237,0.35)',lineHeight:1.55,marginBottom:10}}>{f.desc}</div>
+              <div style={{fontSize:10,color:isActive?f.color:'rgba(237,237,237,0.25)',fontFamily:'JetBrains Mono,monospace'}}>
+                {isActive?'▲ active · click to close':f.status}
+              </div>
+            </button>;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LOCK OUTCOMES PANEL ──────────────────────────────────────────────────────
+function LockPanel({abbr,accentColor,locked,onLock,onReset,ctx}) {
+  const fixtures = FIXTURES[abbr]||[];
+  // Compute total odds adjustment from locked fixtures
+  const totalDelta = fixtures.reduce((sum,f)=>{
+    const outcome=locked[f.id]; if(!outcome) return sum;
+    return sum+(outcome==='home'?f.hD:outcome==='draw'?f.dD:f.aD);
+  },0);
+  const baseVal = ctx?.primary?.value||0;
+  const newVal = Math.min(99.9,Math.max(0.1,baseVal+totalDelta));
+  const own = fixtures.filter(f=>!f.rival);
+  const rival = fixtures.filter(f=>f.rival);
+  function Btn({fid,label,outcome,delta}) {
+    const isLocked=locked[fid]===outcome;
+    const isPositive=delta>=0;
+    return <button onClick={()=>onLock(fid,outcome)} style={{padding:'4px 9px',borderRadius:6,fontSize:10,fontFamily:'JetBrains Mono,monospace',fontWeight:600,cursor:'pointer',border:`1px solid ${isLocked?(isPositive?'rgba(74,222,128,0.5)':'rgba(248,113,113,0.5)'):'rgba(255,255,255,0.08)'}`,background:isLocked?(isPositive?'rgba(74,222,128,0.12)':'rgba(248,113,113,0.12)'):'transparent',color:isLocked?(isPositive?'#4ade80':'#f87171'):'rgba(237,237,237,0.45)',transition:'all .15s',whiteSpace:'nowrap'}}>
+      {label} <span style={{opacity:0.65}}>{delta>0?'+':''}{delta.toFixed(1)}</span>
+    </button>;
+  }
+  function FixtureRow({f}) {
+    const isOwn=f.home===abbr||f.away===abbr;
+    const isLocked=!!locked[f.id];
+    return <div style={{padding:'11px 14px',borderRadius:9,border:`1px solid ${isLocked?accentColor+'30':'rgba(255,255,255,0.06)'}`,background:isLocked?`${accentColor}09`:'rgba(255,255,255,0.02)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+      <div style={{flex:'0 0 48px',fontSize:10,color:'rgba(237,237,237,0.3)',fontFamily:'JetBrains Mono,monospace',textAlign:'center'}}>
+        <div>GW{f.gw}</div><div style={{color:'rgba(237,237,237,0.2)'}}>{f.date}</div>
+      </div>
+      <div style={{flex:1,minWidth:160}}>
+        <span style={{fontSize:12,fontWeight:isOwn?500:400,color:isOwn?'rgba(237,237,237,0.9)':'rgba(237,237,237,0.6)'}}>{tname(f.home)} <span style={{opacity:.4,fontSize:11}}>vs</span> {tname(f.away)}</span>
+        {f.rival&&<span style={{marginLeft:8,fontSize:9,background:'rgba(129,140,248,0.15)',color:'#818cf8',padding:'1px 6px',borderRadius:4,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase'}}>Rival</span>}
+      </div>
+      <div style={{display:'flex',gap:5,flexShrink:0}}>
+        <Btn fid={f.id} label={`${tname(f.home).split(' ')[0]}`} outcome="home" delta={f.hD}/>
+        <Btn fid={f.id} label="Draw" outcome="draw" delta={f.dD}/>
+        <Btn fid={f.id} label={`${tname(f.away).split(' ')[0]}`} outcome="away" delta={f.aD}/>
+      </div>
+    </div>;
+  }
+  const lockedCount=Object.keys(locked).length;
+  return (
+    <div className="fade-up" style={{borderBottom:'1px solid rgba(255,255,255,0.06)',background:'#080808',padding:'24px 0'}}>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'0 24px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:16,marginBottom:18,flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontFamily:'Oswald,sans-serif',fontSize:11,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.4)',marginBottom:2}}>Lock Match Outcomes</div>
+            <div style={{fontSize:12,color:'rgba(237,237,237,0.3)'}}>Pin results to build a scenario — odds update in real time</div>
+          </div>
+          {lockedCount>0&&(
+            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:12}}>
+              <div style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:10,padding:'8px 16px',textAlign:'center'}}>
+                <div style={{fontSize:10,color:'rgba(237,237,237,0.3)',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:2}}>{ctx?.primary?.label} odds</div>
+                <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+                  <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:600,color:'rgba(237,237,237,0.4)',textDecoration:'line-through'}}>{baseVal.toFixed(1)}%</span>
+                  <span style={{fontFamily:'Oswald,sans-serif',fontSize:28,fontWeight:700,color:totalDelta>=0?'#4ade80':'#f87171'}}>{newVal.toFixed(1)}%</span>
+                </div>
+                <div style={{fontSize:10,color:totalDelta>=0?'rgba(74,222,128,0.7)':'rgba(248,113,113,0.7)',fontFamily:'JetBrains Mono,monospace'}}>{totalDelta>=0?'+':''}{totalDelta.toFixed(1)}pp from {lockedCount} lock{lockedCount>1?'s':''}</div>
+              </div>
+              <button onClick={onReset} style={{padding:'7px 14px',borderRadius:8,border:'1px solid rgba(255,255,255,0.1)',background:'transparent',cursor:'pointer',color:'rgba(237,237,237,0.45)',fontSize:11,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase'}}>Reset all</button>
+            </div>
+          )}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div>
+            <div style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'rgba(237,237,237,0.28)',fontFamily:'Oswald,sans-serif',marginBottom:8}}>Your fixtures · GW31–38</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>{own.map(f=><FixtureRow key={f.id} f={f}/>)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'rgba(237,237,237,0.28)',fontFamily:'Oswald,sans-serif',marginBottom:8}}>Rival fixtures · highest leverage</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>{rival.length?rival.map(f=><FixtureRow key={f.id} f={f}/>):<div style={{fontSize:12,color:'rgba(237,237,237,0.22)',padding:'12px 0'}}>No rival fixtures detected for this metric.</div>}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI CHAT PANEL ────────────────────────────────────────────────────────────
+function ChatPanel({abbr,accentColor,ctx}) {
+  const [msgs,setMsgs]=useState([]);
+  const [input,setInput]=useState('');
+  const [busy,setBusy]=useState(false);
+  const bottomRef=useRef(null);
+  const sim=SIM[abbr], teamName=TEAMS.find(t=>t.abbr===abbr)?.name||abbr;
+  const prompts=[`What if ${teamName}'s top scorer gets injured for 3 weeks?`,`What if ${teamName} win their next 3 games?`,`What if the teams above us drop points this weekend?`];
+  async function send(text) {
+    if(!text.trim()||busy) return;
+    const userMsg={role:'user',content:text};
+    setMsgs(m=>[...m,userMsg]); setInput(''); setBusy(true);
+    const pos=SORTED.findIndex(t=>t.abbr===abbr)+1;
+    const systemPrompt=`You are Keepwatch, an AI analyst for a Premier League Monte Carlo simulation tool. The user is tracking ${teamName} (${ordinal(pos)}, ${TEAMS.find(t=>t.abbr===abbr)?.pts} pts, ${ctx?.primary?.label||'European'} odds: ${ctx?.primary?.value?.toFixed(1)||'?'}%). You ran 10,000 season simulations. When given a scenario, give: 1) A brief tactical interpretation (2 sentences), 2) A specific probability adjustment in percentage points (e.g. "-4.2pp" or "+6.8pp") with clear reasoning tied to match probabilities, 3) The updated ${ctx?.primary?.label||'European'} odds. Be precise and data-driven. Keep total response under 120 words.`;
+    try {
+      const response=await window.claude.complete({messages:[{role:'user',content:text}],system:systemPrompt});
+      setMsgs(m=>[...m,{role:'assistant',content:response}]);
+    } catch(e) {
+      setMsgs(m=>[...m,{role:'assistant',content:'Unable to connect to the AI right now. Try again in a moment.'}]);
+    }
+    setBusy(false);
+  }
+  useEffect(()=>{ bottomRef.current?.scrollIntoView({block:'nearest'}); },[msgs,busy]);
+  return (
+    <div className="fade-up" style={{borderBottom:'1px solid rgba(255,255,255,0.06)',background:'#080808',padding:'24px 0'}}>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'0 24px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:20,alignItems:'start'}}>
+          <div style={{display:'flex',flexDirection:'column',gap:0}}>
+            <div style={{fontFamily:'Oswald,sans-serif',fontSize:11,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.4)',marginBottom:2}}>AI Scenario Chat</div>
+            <div style={{fontSize:12,color:'rgba(237,237,237,0.3)',marginBottom:16}}>Describe any scenario — injuries, form runs, managerial changes — and get quantified odds</div>
+            <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,overflow:'hidden',display:'flex',flexDirection:'column',minHeight:260,maxHeight:380}}>
+              <div style={{flex:1,overflowY:'auto',padding:'14px 16px',display:'flex',flexDirection:'column',gap:12}}>
+                {msgs.length===0&&<div style={{textAlign:'center',padding:'32px 0',color:'rgba(237,237,237,0.25)',fontSize:12}}>Ask anything about {teamName}'s season outlook</div>}
+                {msgs.map((m,i)=>(
+                  <div key={i} style={{display:'flex',gap:10,flexDirection:m.role==='user'?'row-reverse':'row'}}>
+                    <div style={{width:24,height:24,borderRadius:'50%',background:m.role==='user'?`${accentColor}44`:'rgba(255,255,255,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:2}}>
+                      <span style={{fontSize:10,color:m.role==='user'?accentColor:'rgba(237,237,237,0.5)'}}>{m.role==='user'?'U':'K'}</span>
+                    </div>
+                    <div style={{maxWidth:'80%',padding:'9px 13px',borderRadius:10,background:m.role==='user'?`${accentColor}14`:'rgba(255,255,255,0.04)',border:`1px solid ${m.role==='user'?accentColor+'25':'rgba(255,255,255,0.07)'}`,fontSize:12,lineHeight:1.65,color:'rgba(237,237,237,0.82)',whiteSpace:'pre-wrap'}}>{m.content}</div>
+                  </div>
+                ))}
+                {busy&&<div className="thinking" style={{display:'flex',gap:10}}>
+                  <div style={{width:24,height:24,borderRadius:'50%',background:'rgba(255,255,255,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><span style={{fontSize:10,color:'rgba(237,237,237,0.5)'}}>K</span></div>
+                  <div style={{padding:'9px 13px',borderRadius:10,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.07)',fontSize:12,color:'rgba(237,237,237,0.4)'}}>Analysing scenario...</div>
+                </div>}
+                <div ref={bottomRef}/>
+              </div>
+              <div style={{borderTop:'1px solid rgba(255,255,255,0.07)',padding:'10px 12px',display:'flex',gap:8}}>
+                <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send(input);}}} placeholder="Describe a scenario…" rows={2}
+                  style={{flex:1,background:'transparent',border:'none',outline:'none',color:'#ededed',fontSize:12,lineHeight:1.6,fontFamily:'Inter,sans-serif',placeholder:'rgba(237,237,237,0.3)'}}/>
+                <button onClick={()=>send(input)} disabled={busy||!input.trim()} style={{alignSelf:'flex-end',padding:'7px 14px',borderRadius:8,border:'none',background:busy||!input.trim()?'rgba(255,255,255,0.06)':`linear-gradient(135deg,${accentColor},${accentColor}bb)`,color:'#fff',fontSize:11,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase',cursor:busy||!input.trim()?'default':'pointer',transition:'all .15s'}}>Send</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'rgba(237,237,237,0.28)',fontFamily:'Oswald,sans-serif',marginBottom:10}}>Try a scenario</div>
+            <div style={{display:'flex',flexDirection:'column',gap:7}}>
+              {prompts.map((p,i)=><button key={i} onClick={()=>send(p)} disabled={busy} style={{padding:'10px 14px',borderRadius:9,border:'1px solid rgba(255,255,255,0.08)',background:'rgba(255,255,255,0.02)',cursor:busy?'default':'pointer',textAlign:'left',fontSize:11,color:'rgba(237,237,237,0.55)',lineHeight:1.5,transition:'all .15s',fontFamily:'Inter,sans-serif'}}
+                onMouseEnter={e=>{if(!busy)e.currentTarget.style.borderColor='rgba(255,255,255,0.18)';}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(255,255,255,0.08)';}}>
+                {p}
+              </button>)}
+            </div>
+            <div style={{marginTop:16,padding:'12px 14px',borderRadius:9,background:`${accentColor}0a`,border:`1px solid ${accentColor}25`}}>
+              <div style={{fontSize:10,color:accentColor,letterSpacing:'0.1em',textTransform:'uppercase',fontFamily:'Oswald,sans-serif',marginBottom:5}}>Current baseline</div>
+              <div style={{fontFamily:'Oswald,sans-serif',fontSize:26,fontWeight:700,color:accentColor,lineHeight:1}}>{ctx?.primary?.value?.toFixed(1)}%</div>
+              <div style={{fontSize:11,color:'rgba(237,237,237,0.35)',marginTop:3}}>{ctx?.primary?.label} · {TEAMS.find(t=>t.abbr===abbr)?.pts} pts</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── REPORT PANEL ─────────────────────────────────────────────────────────────
+function ReportPanel({abbr,accentColor,ctx}) {
+  const [report,setReport]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [metric,setMetric]=useState(ctx?.metricLabel||'European');
+  const teamName=TEAMS.find(t=>t.abbr===abbr)?.name||abbr;
+  const pos=SORTED.findIndex(t=>t.abbr===abbr)+1;
+  const sim=SIM[abbr];
+  async function generate() {
+    setLoading(true); setReport(null);
+    const prompt=`Write a concise analytical report for ${teamName} (${ordinal(pos)}, ${TEAMS.find(t=>t.abbr===abbr)?.pts} pts) targeting their ${metric} odds (currently ${ctx?.primary?.value?.toFixed(1)}%). The team has 8 games remaining. Include: 1) Current situation summary 2) Key fixtures to watch (name 2-3 specific matchups) 3) What needs to go right 4) Risk factors 5) Verdict. Use short paragraphs, no bullet points. Analytical and direct tone. ~200 words.`;
+    try {
+      const r=await window.claude.complete(prompt); setReport(r);
+    } catch { setReport('Unable to generate report. Please try again.'); }
+    setLoading(false);
+  }
+  const metrics=['European','Top 4','Title','Relegation'];
+  return (
+    <div className="fade-up" style={{borderBottom:'1px solid rgba(255,255,255,0.06)',background:'#080808',padding:'24px 0'}}>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'0 24px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:20,alignItems:'start'}}>
+          <div>
+            <div style={{fontFamily:'Oswald,sans-serif',fontSize:11,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.4)',marginBottom:2}}>Generate Report</div>
+            <div style={{fontSize:12,color:'rgba(237,237,237,0.3)',marginBottom:16}}>AI-researched deep dive on {teamName}'s path to qualifying</div>
+            {!report&&!loading&&<div style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'32px 24px',textAlign:'center'}}>
+              <div style={{fontFamily:'Oswald,sans-serif',fontSize:14,letterSpacing:'0.1em',color:'rgba(237,237,237,0.5)',marginBottom:8}}>Ready to generate</div>
+              <div style={{fontSize:12,color:'rgba(237,237,237,0.3)',marginBottom:20,lineHeight:1.6}}>Select a target metric, then generate a full report on {teamName}'s season trajectory, key swing fixtures, and what needs to happen.</div>
+              <button onClick={generate} style={{padding:'10px 28px',borderRadius:9,border:'none',background:'linear-gradient(135deg,#00ccaa,#009988)',color:'#fff',fontFamily:'Oswald,sans-serif',fontSize:12,letterSpacing:'0.14em',textTransform:'uppercase',fontWeight:600,cursor:'pointer'}}>Generate report →</button>
+            </div>}
+            {loading&&<div style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'32px 24px'}}>
+              <div className="thinking" style={{fontFamily:'Oswald,sans-serif',fontSize:13,color:'rgba(237,237,237,0.4)',letterSpacing:'0.1em',marginBottom:10}}>Analysing {teamName}'s season…</div>
+              {['Pulling current standings & fixtures','Running targeted sensitivity analysis','Identifying key swing matchups','Writing report'].map((s,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:7,fontSize:11,color:'rgba(237,237,237,0.3)'}}>
+                <div style={{width:6,height:6,borderRadius:'50%',background:'#00ccaa',opacity:0.7}}/>
+                {s}
+              </div>)}
+            </div>}
+            {report&&<div style={{background:'rgba(255,255,255,0.02)',border:`1px solid ${accentColor}30`,borderRadius:12,padding:'20px 22px'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                <div style={{fontFamily:'Oswald,sans-serif',fontSize:12,letterSpacing:'0.14em',textTransform:'uppercase',color:accentColor}}>Report · {teamName} · {metric}</div>
+                <button onClick={()=>{setReport(null);}} style={{background:'none',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',fontSize:10,color:'rgba(237,237,237,0.4)',cursor:'pointer',fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase'}}>Regenerate</button>
+              </div>
+              <div style={{fontSize:12,color:'rgba(237,237,237,0.72)',lineHeight:1.85,whiteSpace:'pre-wrap'}}>{report}</div>
+            </div>}
+          </div>
+          <div>
+            <div style={{fontSize:10,letterSpacing:'0.14em',textTransform:'uppercase',color:'rgba(237,237,237,0.28)',fontFamily:'Oswald,sans-serif',marginBottom:10}}>Target metric</div>
+            <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:18}}>
+              {metrics.map(m=><button key={m} onClick={()=>setMetric(m)} style={{padding:'9px 14px',borderRadius:9,border:`1px solid ${metric===m?accentColor+'44':'rgba(255,255,255,0.07)'}`,background:metric===m?`${accentColor}10`:'rgba(255,255,255,0.02)',cursor:'pointer',textAlign:'left',fontSize:12,color:metric===m?accentColor:'rgba(237,237,237,0.5)',fontFamily:'Inter,sans-serif',transition:'all .15s'}}>{m}</button>)}
+            </div>
+            <div style={{padding:'12px 14px',borderRadius:9,background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.07)'}}>
+              {[['UCL',sim?.t4?.toFixed(1)+'%','#22c55e'],['Europa',sim?.t6?.toFixed(1)+'%','#f97316'],['European',sim?.eu?.toFixed(1)+'%','#00ccaa'],['Relegation',sim?.rel?.toFixed(1)+'%','#ef4444']].map(([l,v,c])=>(
+                <div key={l} style={{display:'flex',justifyContent:'space-between',marginBottom:6,fontSize:11}}>
+                  <span style={{color:'rgba(237,237,237,0.38)'}}>{l}</span>
+                  <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:600,color:c}}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── WEEKLY PANEL ─────────────────────────────────────────────────────────────
+function WeeklyPanel({abbr,accentColor}) {
+  const [tab,setTab]=useState('preview');
+  const gw31=[
+    { home:'LIV',away:'ARS', date:'Sat Apr 5, 12:30', tip:'Liverpool to win',  conf:'High', homeOdds:'1.62',drawOdds:'3.80',awayOdds:'5.20' },
+    { home:'NEW',away:'ARS', date:'Sat Apr 5, 15:00', tip:'Arsenal to win',    conf:'Med',  homeOdds:'3.40',drawOdds:'3.60',awayOdds:'2.10' },
+    { home:'TOT',away:'CHE', date:'Sat Apr 5, 17:30', tip:'Draw likely',       conf:'Low',  homeOdds:'2.80',drawOdds:'3.20',awayOdds:'2.60' },
+    { home:'MCI',away:'AVL', date:'Sun Apr 6, 14:00',  tip:'Man City to win',  conf:'High', homeOdds:'1.44',drawOdds:'4.50',awayOdds:'7.00' },
+    { home:'BHA',away:'WOL', date:'Sun Apr 6, 16:30',  tip:'Brighton to win',  conf:'Med',  homeOdds:'1.88',drawOdds:'3.60',awayOdds:'4.20' },
+  ];
+  const gw30=[
+    { home:'ARS',away:'MCI', res:'2–1', homeChange:+3.8, tip:'Arsenal big winners — top-4 odds surge' },
+    { home:'NEW',away:'TOT', res:'1–1', homeChange:-1.2, tip:'Newcastle drop 2 points, Spurs gap narrows' },
+    { home:'MUN',away:'SOU', res:'1–2', homeChange:-5.4, tip:'Man United shock result — relegation fear deepens' },
+    { home:'LIV',away:'CHE', res:'3–0', homeChange:+2.1, tip:'Liverpool dominant — title lead extends to 5pts' },
+  ];
+  function confColor(c) { return c==='High'?'#4ade80':c==='Med'?'#facc15':'#f87171'; }
+  return (
+    <div className="fade-up" style={{borderBottom:'1px solid rgba(255,255,255,0.06)',background:'#080808',padding:'24px 0'}}>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'0 24px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:20,marginBottom:18}}>
+          <div>
+            <div style={{fontFamily:'Oswald,sans-serif',fontSize:11,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.4)',marginBottom:2}}>Weekly Content</div>
+            <div style={{fontSize:12,color:'rgba(237,237,237,0.3)'}}>AI-generated previews and roundups each gameweek</div>
+          </div>
+          <div style={{display:'flex',gap:4,marginLeft:'auto'}}>
+            {[['preview','GW31 Preview'],['roundup','GW30 Roundup']].map(([id,label])=>(
+              <button key={id} onClick={()=>setTab(id)} style={{padding:'7px 16px',borderRadius:8,border:`1px solid ${tab===id?'#818cf855':'rgba(255,255,255,0.08)'}`,background:tab===id?'rgba(129,140,248,0.1)':'transparent',cursor:'pointer',color:tab===id?'#818cf8':'rgba(237,237,237,0.45)',fontSize:11,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase',transition:'all .15s'}}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {tab==='preview'&&(
+          <div>
+            <div style={{fontSize:11,color:'rgba(237,237,237,0.3)',marginBottom:12}}>Key GW31 matches · Saturday–Sunday 5 April</div>
+            <div style={{display:'flex',flexDirection:'column',gap:7}}>
+              {gw31.map((m,i)=>{
+                const isInvolved=m.home===abbr||m.away===abbr;
+                return <div key={i} style={{padding:'12px 16px',borderRadius:10,border:`1px solid ${isInvolved?accentColor+'30':'rgba(255,255,255,0.06)'}`,background:isInvolved?`${accentColor}07`:'rgba(255,255,255,0.02)',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                  <div style={{minWidth:180,flex:1}}>
+                    <div style={{fontSize:13,fontWeight:500,color:isInvolved?'rgba(237,237,237,0.9)':'rgba(237,237,237,0.7)'}}>{tname(m.home)} <span style={{opacity:.4,fontSize:11}}>vs</span> {tname(m.away)}</div>
+                    <div style={{fontSize:10,color:'rgba(237,237,237,0.28)',marginTop:2}}>{m.date}</div>
+                  </div>
+                  <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                    {[['H',m.homeOdds],['D',m.drawOdds],['A',m.awayOdds]].map(([l,o])=><div key={l} style={{textAlign:'center',minWidth:36}}>
+                      <div style={{fontSize:9,color:'rgba(237,237,237,0.25)',textTransform:'uppercase',fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em'}}>{l}</div>
+                      <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,fontWeight:600,color:'rgba(237,237,237,0.65)'}}>{o}</div>
+                    </div>)}
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginLeft:'auto'}}>
+                    <span style={{fontSize:10,background:`${confColor(m.conf)}18`,color:confColor(m.conf),padding:'2px 8px',borderRadius:5,fontFamily:'Oswald,sans-serif',letterSpacing:'0.1em',textTransform:'uppercase'}}>{m.conf}</span>
+                    <span style={{fontSize:11,color:'rgba(237,237,237,0.55)',fontStyle:'italic'}}>{m.tip}</span>
+                  </div>
+                </div>;
+              })}
+            </div>
+          </div>
+        )}
+        {tab==='roundup'&&(
+          <div>
+            <div style={{fontSize:11,color:'rgba(237,237,237,0.3)',marginBottom:12}}>GW30 results · key odds movements</div>
+            <div style={{display:'flex',flexDirection:'column',gap:7}}>
+              {gw30.map((m,i)=>{
+                const isInvolved=m.home===abbr||m.away===abbr;
+                return <div key={i} style={{padding:'12px 16px',borderRadius:10,border:`1px solid ${isInvolved?accentColor+'30':'rgba(255,255,255,0.06)'}`,background:isInvolved?`${accentColor}07`:'rgba(255,255,255,0.02)',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                  <div style={{flex:1,minWidth:160}}>
+                    <div style={{fontSize:13,fontWeight:500,color:'rgba(237,237,237,0.8)'}}>{tname(m.home)} <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,fontSize:14,color:isInvolved?accentColor:'rgba(237,237,237,0.95)'}}>{m.res}</span> {tname(m.away)}</div>
+                    <div style={{fontSize:11,color:'rgba(237,237,237,0.4)',marginTop:3,fontStyle:'italic'}}>{m.tip}</div>
+                  </div>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,fontWeight:600,color:m.homeChange>=0?'#4ade80':'#f87171',flexShrink:0}}>
+                    {m.homeChange>=0?'+':''}{m.homeChange.toFixed(1)}pp
+                  </div>
+                </div>;
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── OVERVIEW COMPONENTS ──────────────────────────────────────────────────────
+function Overview({abbr,accentColor,ctx,locked}) {
+  const sim=SIM[abbr]; if(!sim||!ctx) return null;
+  const fixtures=FIXTURES[abbr]||[];
+  const lockedDelta=fixtures.reduce((sum,f)=>{const o=locked[f.id];return sum+(o?o==='home'?f.hD:o==='draw'?f.dD:f.aD:0);},0);
+  const hasLocks=Object.keys(locked).length>0;
+  const displayVal=Math.min(99.9,Math.max(0.1,ctx.primary.value+lockedDelta));
+  const p=ctx.primary;
+  // Histogram
+  const dist=sim.dist, maxV=Math.max(...dist,1);
+  return <div className="fade-up">
+    {/* Hero card */}
+    <div style={{background:`linear-gradient(135deg,${accentColor}18 0%,${accentColor}08 55%,rgba(255,255,255,0.015) 100%)`,border:`1px solid ${accentColor}38`,borderRadius:16,padding:'28px 32px',marginBottom:10,position:'relative',overflow:'hidden'}}>
+      <div style={{position:'absolute',top:-60,right:-60,width:220,height:220,background:`radial-gradient(circle,${accentColor}1e 0%,transparent 68%)`,pointerEvents:'none'}}/>
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:20}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:'Oswald,sans-serif',fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',color:'rgba(237,237,237,0.42)',marginBottom:4}}>{p.label} Probability · Primary Metric</div>
+          <div style={{display:'flex',alignItems:'baseline',gap:12,marginBottom:8}}>
+            {hasLocks&&<span style={{fontFamily:'Oswald,sans-serif',fontSize:36,fontWeight:600,color:'rgba(237,237,237,0.25)',lineHeight:1,textDecoration:'line-through'}}>{p.value.toFixed(1)}%</span>}
+            <span style={{fontFamily:'Oswald,sans-serif',fontSize:80,fontWeight:700,lineHeight:1,color:hasLocks?(lockedDelta>=0?'#4ade80':'#f87171'):accentColor,letterSpacing:'-0.02em',transition:'color .3s'}}>{displayVal.toFixed(1)}<span style={{fontSize:38,opacity:.6,fontWeight:600}}>%</span></span>
+          </div>
+          <div style={{fontSize:13,color:'rgba(237,237,237,0.4)',lineHeight:1.5}}>
+            {p.sub}
+            {hasLocks&&<span style={{marginLeft:12,fontSize:11,color:lockedDelta>=0?'rgba(74,222,128,0.8)':'rgba(248,113,113,0.8)',fontFamily:'JetBrains Mono,monospace'}}>{lockedDelta>=0?'+':''}{lockedDelta.toFixed(1)}pp from scenario</span>}
+          </div>
+        </div>
+        <div style={{textAlign:'right',paddingTop:6,flexShrink:0}}>
+          <div style={{fontSize:10,color:'rgba(237,237,237,0.28)',letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:3}}>Avg final pts</div>
+          <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:32,fontWeight:500,color:'rgba(237,237,237,0.75)',lineHeight:1}}>{sim.avg.toFixed(1)}</div>
+          <div style={{fontSize:10,color:'rgba(237,237,237,0.2)',marginTop:4}}>10,000 sims</div>
+        </div>
+      </div>
+      <div style={{marginTop:20}}><OddsBar value={displayVal} color={hasLocks?(lockedDelta>=0?'#4ade80':'#f87171'):accentColor} h={4}/></div>
+    </div>
+    {/* Secondary cards */}
+    <div style={{display:'grid',gridTemplateColumns:`repeat(${ctx.secondary.length},1fr)`,gap:8,marginBottom:40}}>
+      {ctx.secondary.map(c=><div key={c.key} style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:12,padding:'16px 18px'}}>
+        <div style={{fontFamily:'Oswald,sans-serif',fontSize:10,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.38)',marginBottom:5}}>{c.label}</div>
+        <div style={{fontFamily:'Oswald,sans-serif',fontSize:38,fontWeight:700,lineHeight:1,color:c.color,marginBottom:4}}>{c.value.toFixed(1)}<span style={{fontSize:18,opacity:.65}}>%</span></div>
+        <div style={{fontSize:11,color:'rgba(237,237,237,0.28)',marginBottom:14}}>{c.sub}</div>
+        <OddsBar value={c.value} color={c.color} h={3}/>
+      </div>)}
+    </div>
+    {/* Histogram */}
+    <div style={{marginBottom:40}}>
+      <div style={{fontFamily:'Oswald,sans-serif',fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',color:'rgba(237,237,237,0.38)',marginBottom:3}}>Finishing Position Distribution</div>
+      <div style={{fontSize:12,color:'rgba(237,237,237,0.22)',marginBottom:16}}>Where this team finishes across 10,000 simulated seasons</div>
+      <div style={{background:'rgba(255,255,255,0.015)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:12,padding:'18px 14px 12px'}}>
+        <div style={{display:'flex',alignItems:'flex-end',gap:3,height:90}}>
+          {dist.map((v,i)=><div key={i} title={`${ordinal(i+1)}: ${v.toFixed(1)}%`} style={{flex:1,height:'100%',display:'flex',flexDirection:'column',justifyContent:'flex-end'}}>
+            <div style={{width:'100%',borderRadius:'2px 2px 0 0',height:`${Math.max((v/maxV)*100,v>0?2.5:0)}%`,background:getHistColor(i+1),opacity:v>0?.78:.07,transition:'height .5s ease'}}/>
+          </div>)}
+        </div>
+        <div style={{display:'flex',gap:3,marginTop:4}}>{dist.map((_,i)=><div key={i} style={{flex:1,textAlign:'center',fontSize:8,color:'rgba(237,237,237,0.18)',fontFamily:'JetBrains Mono,monospace'}}>{i+1}</div>)}</div>
+        <div style={{display:'flex',gap:14,marginTop:12,flexWrap:'wrap'}}>
+          {[['#22c55e','UCL'],['#3b82f6','UCL 5th'],['#f97316','Europa'],['#00ccaa','Conference'],['rgba(255,255,255,0.22)','Mid'],['#ef4444','Relegation']].map(([c,l])=><div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'rgba(237,237,237,0.28)'}}><div style={{width:8,height:8,borderRadius:2,background:c}}/>{l}</div>)}
+        </div>
+      </div>
+    </div>
+    {/* Standings mini */}
+    <StandingsMini abbr={abbr} accentColor={accentColor}/>
+  </div>;
+}
+
+function StandingsMini({abbr,accentColor}) {
+  const [exp,setExp]=useState(false);
+  const display=exp?SORTED:SORTED.slice(0,10);
+  return <div style={{marginBottom:40}}>
+    <div style={{fontFamily:'Oswald,sans-serif',fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',color:'rgba(237,237,237,0.38)',marginBottom:16}}>Current Standings · GW30</div>
+    <div style={{background:'rgba(255,255,255,0.015)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:12,overflow:'hidden'}}>
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+          <thead><tr style={{borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+            {['#','Team','P','W','D','L','GD','Pts'].map(h=><th key={h} style={{padding:'9px 10px',textAlign:h==='Team'?'left':'center',fontSize:10,letterSpacing:'0.12em',textTransform:'uppercase',fontWeight:600,color:'rgba(237,237,237,0.25)',fontFamily:'Oswald,sans-serif'}}>{h}</th>)}
+          </tr></thead>
+          <tbody>{display.map((t,i)=>{const pos=i+1,isSel=t.abbr===abbr,z=getZone(pos),gd=t.gf-t.ga,ta=COLORS[t.abbr]||'#00ccaa';
+            return <tr key={t.abbr} style={{borderBottom:'1px solid rgba(255,255,255,0.04)',background:isSel?`${accentColor}12`:z?z.bg:'transparent',borderLeft:`3px solid ${isSel?accentColor:'transparent'}`}}>
+              <td style={{padding:'8px 10px',textAlign:'center',color:'rgba(237,237,237,0.25)',fontFamily:'JetBrains Mono,monospace',fontSize:11}}>{pos}</td>
+              <td style={{padding:'8px 10px',fontWeight:isSel?600:400,color:isSel?ta:'rgba(237,237,237,0.82)'}}>{t.name}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',color:'rgba(237,237,237,0.32)',fontFamily:'JetBrains Mono,monospace'}}>{t.played}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',color:'rgba(237,237,237,0.32)',fontFamily:'JetBrains Mono,monospace'}}>{t.won}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',color:'rgba(237,237,237,0.32)',fontFamily:'JetBrains Mono,monospace'}}>{t.drawn}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',color:'rgba(237,237,237,0.32)',fontFamily:'JetBrains Mono,monospace'}}>{t.lost}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',fontFamily:'JetBrains Mono,monospace',color:gd>0?'#4ade80':gd<0?'#f87171':'rgba(237,237,237,0.32)'}}>{gd>0?'+':''}{gd}</td>
+              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:700,fontFamily:'JetBrains Mono,monospace',fontSize:13}}>{t.pts}</td>
+            </tr>;})}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <button onClick={()=>setExp(!exp)} style={{marginTop:8,background:'none',border:'1px solid rgba(255,255,255,0.07)',borderRadius:7,padding:'6px 16px',fontSize:10,color:'rgba(237,237,237,0.38)',cursor:'pointer',fontFamily:'Oswald,sans-serif',letterSpacing:'0.12em',textTransform:'uppercase'}}>{exp?'Show less ↑':'Show all 20 teams ↓'}</button>
+  </div>;
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [team,setTeam]=useState('NEW');
+  const [activeFeature,setActiveFeature]=useState(null);
+  const [locked,setLocked]=useState({});
+  const [tweaksOpen,setTweaksOpen]=useState(false);
+  const accentColor=COLORS[team]||'#00ccaa';
+  const ctx=getContext(team);
+  const teamData=TEAMS.find(t=>t.abbr===team);
+  const pos=SORTED.findIndex(t=>t.abbr===team)+1;
+  const lockedCount=Object.keys(locked).length;
+
+  useEffect(()=>{
+    const h=(e)=>{if(e.data?.type==='__activate_edit_mode')setTweaksOpen(true);if(e.data?.type==='__deactivate_edit_mode')setTweaksOpen(false);};
+    window.addEventListener('message',h);
+    window.parent.postMessage({type:'__edit_mode_available'},'*');
+    return()=>window.removeEventListener('message',h);
+  },[]);
+
+  function selectTeam(abbr){setTeam(abbr);setLocked({});setActiveFeature(null);}
+  function toggleFeature(id){setActiveFeature(a=>a===id?null:id);}
+  function handleLock(fid,outcome){
+    setLocked(prev=>{
+      const next={...prev};
+      if(next[fid]===outcome) delete next[fid]; else next[fid]=outcome;
+      // Auto-open lock panel if locking from elsewhere
+      return next;
+    });
+  }
+
+  return <div style={{background:'#0a0a0a',minHeight:'100vh',color:'#ededed'}}>
+    {/* HEADER */}
+    <div style={{borderBottom:`2px solid ${accentColor}28`,background:`linear-gradient(160deg,#050505 0%,#111 55%,#0a0a0a 100%)`,position:'relative',overflow:'hidden',paddingBottom:0}}>
+      <div style={{position:'absolute',top:-50,right:-30,width:260,height:260,background:`radial-gradient(circle,${accentColor}1a 0%,transparent 65%)`,pointerEvents:'none'}}/>
+      <div style={{maxWidth:920,margin:'0 auto',padding:'20px 24px 0'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <div style={{width:42,height:42,borderRadius:10,background:`linear-gradient(135deg,${accentColor}cc,${accentColor}44)`,border:`1.5px solid ${accentColor}55`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <span style={{fontFamily:'Oswald,sans-serif',fontWeight:700,fontSize:11,color:'#fff',letterSpacing:'0.05em'}}>{team}</span>
+            </div>
+            <div>
+              <div style={{fontFamily:'Oswald,sans-serif',fontSize:22,fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',lineHeight:1.1}}>Keepwatch</div>
+              <div style={{fontSize:10,color:'rgba(237,237,237,0.32)',letterSpacing:'0.2em',textTransform:'uppercase'}}>EPL Season Simulator</div>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8,flexShrink:0}}>
+            {[['Position',ordinal(pos),accentColor],['Points',teamData?.pts,'rgba(237,237,237,0.75)'],['Games left',38-(teamData?.played||30),'rgba(237,237,237,0.75)']].map(([l,v,c])=><div key={l} style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:10,padding:'6px 14px',textAlign:'center',minWidth:64}}>
+              <div style={{fontSize:10,color:'rgba(237,237,237,0.28)',letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:2}}>{l}</div>
+              <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:600,color:c,lineHeight:1}}>{v}</div>
+            </div>)}
+          </div>
+        </div>
+        {ctx&&<div style={{marginBottom:14,fontSize:13,color:'rgba(237,237,237,0.45)',lineHeight:1.7}}>
+          <span style={{color:accentColor,fontWeight:600}}>{teamData?.name}</span>{' '}are{' '}
+          <span style={{color:'rgba(237,237,237,0.7)'}}>{ctx.narrative}</span>
+        </div>}
+        {/* Team pills */}
+        <div className="hscroll" style={{marginLeft:-24,marginRight:-24,paddingLeft:24,paddingRight:24}}>
+          <div style={{display:'flex',gap:3,width:'max-content'}}>
+            {SORTED.map((t,i)=>{const isSel=t.abbr===team,ta=COLORS[t.abbr]||'#00ccaa';
+              return <button key={t.abbr} onClick={()=>selectTeam(t.abbr)} style={{padding:'8px 13px 9px',borderRadius:'8px 8px 0 0',cursor:'pointer',border:isSel?`1.5px solid ${ta}45`:'1.5px solid transparent',borderBottom:isSel?`2px solid ${ta}`:'1.5px solid transparent',background:isSel?`${ta}18`:'rgba(255,255,255,0.02)',display:'flex',flexDirection:'column',alignItems:'center',gap:2,minWidth:50,transition:'all .15s'}}>
+                <span style={{fontFamily:'Oswald,sans-serif',fontSize:11,fontWeight:700,letterSpacing:'0.06em',color:isSel?ta:'rgba(237,237,237,0.42)'}}>{t.abbr}</span>
+                <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:9,color:isSel?'rgba(237,237,237,0.55)':'rgba(237,237,237,0.2)'}}>{i+1}</span>
+              </button>;})}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* FEATURE STRIP */}
+    <FeatureStrip active={activeFeature} onToggle={toggleFeature} lockedCount={lockedCount} teamAbbr={team} accentColor={accentColor}/>
+
+    {/* FEATURE PANELS */}
+    {activeFeature==='lock'&&<LockPanel abbr={team} accentColor={accentColor} locked={locked} onLock={handleLock} onReset={()=>setLocked({})} ctx={ctx}/>}
+    {activeFeature==='chat'&&<ChatPanel abbr={team} accentColor={accentColor} ctx={ctx}/>}
+    {activeFeature==='report'&&<ReportPanel abbr={team} accentColor={accentColor} ctx={ctx}/>}
+    {activeFeature==='weekly'&&<WeeklyPanel abbr={team} accentColor={accentColor}/>}
+
+    {/* MAIN CONTENT */}
+    <div style={{maxWidth:920,margin:'0 auto',padding:'36px 24px'}}>
+      <Overview abbr={team} accentColor={accentColor} ctx={ctx} locked={locked}/>
+      <div style={{background:'rgba(255,255,255,0.012)',border:'1px solid rgba(255,255,255,0.05)',borderRadius:12,padding:'16px 20px',marginBottom:32,fontSize:11,color:'rgba(237,237,237,0.26)',lineHeight:1.9}}>
+        <span style={{fontFamily:'Oswald,sans-serif',fontSize:10,letterSpacing:'0.18em',textTransform:'uppercase',color:'rgba(237,237,237,0.32)'}}>Methodology · </span>
+        Monte Carlo simulation of 10,000 season outcomes. Match probabilities from bookmaker odds where available, Elo-estimated otherwise. Sensitivity analysis re-runs 1,000 simulations per fixture lock.
+        <span style={{display:'block',marginTop:6,color:'rgba(237,237,237,0.16)',fontStyle:'italic'}}>Standings as of March 21, 2026.</span>
+      </div>
+    </div>
+
+    {/* TWEAKS */}
+    {tweaksOpen&&<div style={{position:'fixed',bottom:24,right:24,width:280,background:'#141414',border:'1px solid rgba(255,255,255,0.13)',borderRadius:16,padding:20,zIndex:1000,boxShadow:'0 24px 64px rgba(0,0,0,0.7)'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+        <div style={{fontFamily:'Oswald,sans-serif',fontSize:12,letterSpacing:'0.16em',textTransform:'uppercase',color:'rgba(237,237,237,0.7)'}}>Tweaks</div>
+        <button onClick={()=>{setTweaksOpen(false);window.parent.postMessage({type:'__edit_mode_dismissed'},'*');}} style={{background:'none',border:'none',cursor:'pointer',color:'rgba(237,237,237,0.4)',fontSize:18,lineHeight:1}}>×</button>
+      </div>
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:11,color:'rgba(237,237,237,0.4)',marginBottom:7}}>Team</div>
+        <select value={team} onChange={e=>selectTeam(e.target.value)} style={{width:'100%',background:'#1a1a1a',border:'1px solid rgba(255,255,255,0.12)',borderRadius:8,padding:'8px 12px',color:'#ededed',fontSize:12,cursor:'pointer',outline:'none'}}>
+          {SORTED.map((t,i)=><option key={t.abbr} value={t.abbr}>{i+1}. {t.name} ({t.pts}pts)</option>)}
+        </select>
+      </div>
+      <div style={{fontSize:11,color:'rgba(237,237,237,0.4)',marginBottom:7}}>Open Feature</div>
+      <div style={{display:'flex',flexDirection:'column',gap:5}}>
+        {[['lock','Lock Outcomes'],['chat','AI Scenarios'],['report','Generate Report'],['weekly','Weekly']].map(([id,l])=><button key={id} onClick={()=>setActiveFeature(f=>f===id?null:id)} style={{padding:'7px 12px',borderRadius:8,border:`1px solid ${activeFeature===id?'rgba(255,255,255,0.16)':'rgba(255,255,255,0.06)'}`,background:activeFeature===id?'rgba(255,255,255,0.07)':'transparent',cursor:'pointer',color:activeFeature===id?'rgba(237,237,237,0.85)':'rgba(237,237,237,0.4)',fontSize:11,textAlign:'left',fontFamily:'Inter,sans-serif'}}>{l}</button>)}
+      </div>
+    </div>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

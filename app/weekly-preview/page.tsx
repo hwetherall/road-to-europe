@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -83,9 +84,9 @@ const markdownComponents: Components = {
 export default async function WeeklyPreviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ matchday?: string }>;
-}) {
-  const params = await searchParams;
+  searchParams?: Promise<{ matchday?: string }>;
+} = {}) {
+  const params: { matchday?: string } = await (searchParams ?? Promise.resolve({}));
   const matchdayParam = params.matchday ? parseInt(params.matchday, 10) : null;
 
   const cacheEnabled = isWeeklyPreviewConfigured();
@@ -103,12 +104,12 @@ export default async function WeeklyPreviewPage({
     <main className="min-h-screen bg-[#0b0b0b] text-white">
       <div className="mx-auto max-w-[860px] px-5 py-12">
         {/* Back nav */}
-        <a
+        <Link
           href="/"
           className="inline-flex items-center gap-1 text-[11px] text-white/30 hover:text-white/60 transition-colors mb-6"
         >
           ← Dashboard
-        </a>
+        </Link>
 
         {/* Header */}
         <header className="mb-8">
@@ -146,7 +147,7 @@ export default async function WeeklyPreviewPage({
               Archive
             </div>
             <div className="flex flex-wrap gap-2">
-              <a
+              <Link
                 href="/weekly-preview"
                 className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                   !isArchiveView
@@ -155,11 +156,11 @@ export default async function WeeklyPreviewPage({
                 }`}
               >
                 Latest
-              </a>
+              </Link>
               {archive.map((item) => {
                 const isActive = isArchiveView && matchdayParam === item.matchday;
                 return (
-                  <a
+                  <Link
                     key={item.id}
                     href={`/weekly-preview?matchday=${item.matchday}`}
                     className={`rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
@@ -169,7 +170,7 @@ export default async function WeeklyPreviewPage({
                     }`}
                   >
                     MD {item.matchday}
-                  </a>
+                  </Link>
                 );
               })}
             </div>

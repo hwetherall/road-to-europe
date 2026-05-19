@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
-import { getFixturesData } from '@/lib/live-data';
+import { getLatestRoundupGenerationStatus } from '@/lib/weekly-roundup/dossier';
 import { generateWeeklyRoundupDraft } from '@/lib/weekly-roundup/orchestrator';
 
 export const dynamic = 'force-dynamic';
@@ -14,19 +14,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Determine the latest completed matchday
-    const { data: fixtures } = await getFixturesData();
-    const finishedMatchdays = [
-      ...new Set(
-        fixtures
-          .filter((f) => f.status === 'FINISHED')
-          .map((f) => f.matchday)
-      ),
-    ].sort((a, b) => b - a);
-
-    const latestMatchday = finishedMatchdays[0];
+    const { matchday: latestMatchday } = await getLatestRoundupGenerationStatus();
     if (!latestMatchday) {
-      return NextResponse.json({ error: 'No completed matchday found' }, { status: 404 });
+      return NextResponse.json({ error: 'No finished fixtures found' }, { status: 404 });
     }
 
     const result = await generateWeeklyRoundupDraft({ matchday: latestMatchday });

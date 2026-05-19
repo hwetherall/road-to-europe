@@ -159,7 +159,7 @@ export async function listWeeklyPreviews(club = 'NEW'): Promise<WeeklyPreviewLis
     .from(TABLE_NAME)
     .select('id, matchday, season, generated_at, status')
     .eq('club_abbr', club)
-    .order('matchday', { ascending: false });
+    .order('generated_at', { ascending: false });
 
   if (error || !data) return [];
   return (data as Array<{ id: string; matchday: number; season: string; generated_at: string; status: 'draft' | 'published' }>).map(

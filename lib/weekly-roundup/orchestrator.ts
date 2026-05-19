@@ -1,20 +1,34 @@
 import { randomUUID } from 'crypto';
-import { callOpenRouter } from '@/lib/openrouter';
+import { callOpenRouter, OpenRouterResponseFormat } from '@/lib/openrouter';
 import { buildRoundupDossier } from '@/lib/weekly-roundup/dossier';
 import { buildRoundupResearchBundle } from '@/lib/weekly-roundup/research';
-import { upsertWeeklyRoundupDraft } from '@/lib/weekly-roundup/cache';
+import {
+  insertWeeklyRoundupAudit,
+  upsertWeeklyRoundupDraft,
+} from '@/lib/weekly-roundup/cache';
 import {
   buildRoundupSectionSystemPrompt,
   buildRoundupSectionUserPrompt,
   buildRoundupEditorPrompt,
+  buildRoundupReviewerPrompt,
 } from '@/lib/weekly-roundup/prompts';
 import {
   validateRoundupSections,
   validateRoundupSingleSection,
 } from '@/lib/weekly-roundup/validators';
 import {
+  issueCounts,
+  runRoundupQualityChecks,
+} from '@/lib/weekly-roundup/quality-checks';
+import {
   PerfectWeekendGrade,
   ProbabilityShift,
+  RoundupQaAudit,
+  RoundupQaCategory,
+  RoundupQaIssue,
+  RoundupQaSectionRef,
+  RoundupQaSeverity,
+  RoundupQaSummary,
   WEEKLY_ROUNDUP_SECTION_ORDER,
   WEEKLY_ROUNDUP_VERSION,
   RoundupDraft,
@@ -24,13 +38,143 @@ import {
 
 const SECTION_MODEL = 'anthropic/claude-sonnet-4-6';
 const EDITOR_MODEL = 'anthropic/claude-opus-4-6';
+const REVIEWER_MODEL = process.env.ROUNDUP_REVIEWER_MODEL ?? 'openai/gpt-5.5';
+
+// ── Structured Output Schemas ──
+
+function buildRoundupSectionSchema(sectionId?: WeeklyRoundupSectionId): OpenRouterResponseFormat {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: sectionId ? `weekly_roundup_${sectionId.replaceAll('-', '_')}` : 'weekly_roundup_section',
+      strict: true,
+      schema: {
+        type: 'object',
+        required: ['sectionId', 'headline', 'markdown', 'sourceRefs', 'handoffNotes', 'meta'],
+        additionalProperties: false,
+        properties: {
+          sectionId: {
+            type: 'string',
+            enum: sectionId ? [sectionId] : [...WEEKLY_ROUNDUP_SECTION_ORDER],
+          },
+          headline: { type: 'string' },
+          markdown: { type: 'string' },
+          sourceRefs: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          handoffNotes: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          meta: {
+            type: 'object',
+            required: ['fixtureCount', 'hitRate'],
+            additionalProperties: false,
+            properties: {
+              fixtureCount: { type: 'number' },
+              hitRate: { type: 'number' },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+const ROUNDUP_EDITOR_SCHEMA: OpenRouterResponseFormat = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'weekly_roundup_editor',
+    strict: true,
+    schema: {
+      type: 'object',
+      required: ['sections'],
+      additionalProperties: false,
+      properties: {
+        sections: {
+          type: 'array',
+          items: buildRoundupSectionSchema().json_schema.schema,
+        },
+      },
+    },
+  },
+};
+
+const QA_SEVERITIES: RoundupQaSeverity[] = ['low', 'medium', 'high'];
+const QA_CATEGORIES: RoundupQaCategory[] = [
+  'logical_contradiction',
+  'numeric_consistency',
+  'score_or_result',
+  'unsupported_claim',
+  'style_or_clarity',
+  'source_or_internal_language',
+  'schema_or_validation',
+];
+const QA_SECTION_REFS: RoundupQaSectionRef[] = [
+  ...WEEKLY_ROUNDUP_SECTION_ORDER,
+  'cross-section',
+  'full-report',
+];
+
+const ROUNDUP_REVIEWER_SCHEMA: OpenRouterResponseFormat = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'weekly_roundup_reviewer',
+    strict: true,
+    schema: {
+      type: 'object',
+      required: ['sections', 'audit'],
+      additionalProperties: false,
+      properties: {
+        sections: {
+          type: 'array',
+          items: buildRoundupSectionSchema().json_schema.schema,
+        },
+        audit: {
+          type: 'object',
+          required: ['summary', 'issues'],
+          additionalProperties: false,
+          properties: {
+            summary: { type: 'string' },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: [
+                  'issueId',
+                  'severity',
+                  'category',
+                  'sectionId',
+                  'originalExcerpt',
+                  'explanation',
+                  'correction',
+                  'promptTuningNote',
+                ],
+                additionalProperties: false,
+                properties: {
+                  issueId: { type: 'string' },
+                  severity: { type: 'string', enum: QA_SEVERITIES },
+                  category: { type: 'string', enum: QA_CATEGORIES },
+                  sectionId: { type: 'string', enum: QA_SECTION_REFS },
+                  originalExcerpt: { type: 'string' },
+                  explanation: { type: 'string' },
+                  correction: { type: 'string' },
+                  promptTuningNote: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
 
 // ── Parsing Helpers ──
 
 function parseSection(content: string): RoundupSectionArtifact {
-  const cleaned = content.trim();
-  const fenced = cleaned.match(/```json\s*([\s\S]*?)\s*```/);
-  return JSON.parse((fenced ? fenced[1] : cleaned).trim()) as RoundupSectionArtifact;
+  return parseJsonPayload<RoundupSectionArtifact>(content);
 }
 
 function parseJsonPayload<T>(content: string): T {
@@ -47,6 +191,32 @@ function parseJsonPayload<T>(content: string): T {
     }
     throw new SyntaxError(`Unable to parse JSON payload: ${cleaned.slice(0, 200)}`);
   }
+}
+
+function uniqueIssues(issues: RoundupQaIssue[]): RoundupQaIssue[] {
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = issue.issueId || `${issue.sectionId}:${issue.originalExcerpt}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildQaSummary(audit: RoundupQaAudit): RoundupQaSummary {
+  const allIssues = uniqueIssues([...audit.issues, ...audit.deterministicIssues]);
+  const counts = issueCounts(allIssues);
+
+  return {
+    reviewerModel: audit.reviewerModel,
+    status: audit.status,
+    reviewedAt: audit.reviewedAt,
+    issueCount: allIssues.length,
+    deterministicIssueCount: audit.deterministicIssues.length,
+    acceptedReviewerOutput: audit.acceptedReviewerOutput,
+    fallbackReason: audit.fallbackReason,
+    ...counts,
+  };
 }
 
 // ── Markdown Assembly ──
@@ -227,23 +397,136 @@ async function runRoundupSectionAgent(
       {
         model: SECTION_MODEL,
         maxTokens: 22000,
+        responseFormat: buildRoundupSectionSchema(sectionId),
       }
     );
 
-    const section = parseSection(message.content ?? '');
-
     try {
+      const section = parseSection(message.content ?? '');
       validateRoundupSingleSection(dossier, section);
       return section;
     } catch (error) {
       retryNote = `Your previous output failed validation: ${
         error instanceof Error ? error.message : String(error)
-      }. Rewrite the section and ensure sourceRefs are included for newcastle-deep-dive and rapid-round sections.`;
+      }. Rewrite the section as strict JSON only and ensure sourceRefs are included for newcastle-deep-dive and rapid-round sections.`;
       if (attempt === 2) throw error;
     }
   }
 
   throw new Error(`Unable to generate valid section for ${sectionId}.`);
+}
+
+async function runRoundupReviewer(
+  dossier: Awaited<ReturnType<typeof buildRoundupDossier>>,
+  sections: RoundupSectionArtifact[]
+): Promise<{ sections: RoundupSectionArtifact[]; audit: RoundupQaAudit; calls: number }> {
+  const readerFacingSections = injectPerfectWeekendTable(
+    injectShiftTable(sections, dossier.probabilityShifts),
+    dossier.perfectWeekendGrades
+  );
+  const deterministicIssues = runRoundupQualityChecks(dossier, readerFacingSections);
+  const startedAt = Date.now();
+  let calls = 0;
+  let retryNote: string | undefined;
+  let fallbackReason = 'Reviewer did not return an accepted revision.';
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const message = await callOpenRouter(
+        [
+          {
+            role: 'system',
+            content:
+              'You are a precise final QA editor for football reports. Output strict JSON only.',
+          },
+          {
+            role: 'user',
+            content: buildRoundupReviewerPrompt({
+              dossier,
+              editableSections: sections,
+              readerFacingMarkdown: buildFinalMarkdown(readerFacingSections),
+              deterministicIssues,
+              retryNote,
+            }),
+          },
+        ],
+        {
+          model: REVIEWER_MODEL,
+          maxTokens: 300000,
+          responseFormat: ROUNDUP_REVIEWER_SCHEMA,
+        }
+      );
+      calls++;
+
+      const payload = parseJsonPayload<{
+        sections?: RoundupSectionArtifact[];
+        audit?: { summary?: string; issues?: RoundupQaIssue[] };
+      }>(message.content ?? '{}');
+
+      const reviewedSections = payload.sections ?? sections;
+      validateRoundupSections(dossier, reviewedSections);
+
+      const reviewedReaderFacingSections = injectPerfectWeekendTable(
+        injectShiftTable(reviewedSections, dossier.probabilityShifts),
+        dossier.perfectWeekendGrades
+      );
+      const remainingDeterministicIssues = runRoundupQualityChecks(
+        dossier,
+        reviewedReaderFacingSections
+      );
+      const remainingHighIssues = remainingDeterministicIssues.filter(
+        (issue) => issue.severity === 'high'
+      );
+
+      if (remainingHighIssues.length > 0) {
+        fallbackReason = `Reviewer output left ${remainingHighIssues.length} high-severity deterministic issue(s).`;
+        retryNote = `${fallbackReason} Fix these issues before returning JSON: ${JSON.stringify(
+          remainingHighIssues,
+          null,
+          2
+        )}`;
+        if (attempt === 0) continue;
+        throw new Error(fallbackReason);
+      }
+
+      const reviewerIssues = payload.audit?.issues ?? [];
+      const audit: RoundupQaAudit = {
+        reviewerModel: REVIEWER_MODEL,
+        status:
+          reviewerIssues.length > 0 || deterministicIssues.length > 0 || remainingDeterministicIssues.length > 0
+            ? 'fixed'
+            : 'passed',
+        reviewedAt: startedAt,
+        issues: reviewerIssues,
+        deterministicIssues,
+        summary:
+          payload.audit?.summary ??
+          `Final QA accepted with ${reviewerIssues.length} reviewer issue(s).`,
+        acceptedReviewerOutput: true,
+      };
+
+      return { sections: reviewedSections, audit, calls };
+    } catch (error) {
+      fallbackReason = error instanceof Error ? error.message : String(error);
+      retryNote = `Your previous reviewer output failed: ${fallbackReason}. Return strict JSON only, preserve section order/sourceRefs, and fix the deterministic issues.`;
+      if (attempt === 0) continue;
+    }
+  }
+
+  return {
+    sections,
+    calls,
+    audit: {
+      reviewerModel: REVIEWER_MODEL,
+      status: 'fallback',
+      reviewedAt: startedAt,
+      issues: [],
+      deterministicIssues,
+      summary: 'Final QA reviewer output was not accepted; saved the pre-review editor output.',
+      acceptedReviewerOutput: false,
+      fallbackReason,
+    },
+  };
 }
 
 // ── Main Orchestrator ──
@@ -320,6 +603,7 @@ export async function generateWeeklyRoundupDraft(input: {
     {
       model: EDITOR_MODEL,
       maxTokens: 300000,
+      responseFormat: ROUNDUP_EDITOR_SCHEMA,
     }
   );
   llmCalls++;
@@ -339,6 +623,15 @@ export async function generateWeeklyRoundupDraft(input: {
       error instanceof Error ? error.message : error
     );
   }
+
+  // Final QA reviewer pass
+  console.log('[weekly-roundup] Running final QA reviewer pass...');
+  const reviewResult = await runRoundupReviewer(dossier, finalSections);
+  finalSections = reviewResult.sections;
+  llmCalls += reviewResult.calls;
+  console.log(
+    `[weekly-roundup] Final QA ${reviewResult.audit.status}: ${reviewResult.audit.issues.length} reviewer issue(s), ${reviewResult.audit.deterministicIssues.length} deterministic issue(s)`
+  );
 
   // Inject programmatic tables (rendered server-side for accuracy)
   finalSections = injectShiftTable(finalSections, dossier.probabilityShifts);
@@ -363,8 +656,10 @@ export async function generateWeeklyRoundupDraft(input: {
       llmCalls,
       webSearches: researchBundle.sources.length,
       editorCalls: 1,
-      model: `sections=${SECTION_MODEL}, editor=${EDITOR_MODEL}`,
+      reviewerCalls: reviewResult.calls,
+      model: `sections=${SECTION_MODEL}, editor=${EDITOR_MODEL}, reviewer=${REVIEWER_MODEL}`,
       wallClockTimeMs,
+      qa: buildQaSummary(reviewResult.audit),
     },
   };
 
@@ -373,5 +668,8 @@ export async function generateWeeklyRoundupDraft(input: {
   );
 
   const persisted = await upsertWeeklyRoundupDraft(draft);
+  if (persisted.persisted) {
+    await insertWeeklyRoundupAudit(persisted.draft, reviewResult.audit);
+  }
   return persisted;
 }

@@ -91,11 +91,11 @@ describe('weekly preview validators', () => {
         ['title-leader-champion']
       ),
       makeSection('hot-news', `Hot news worth ${dossier.allowedNumericClaimsBySection['hot-news'][0].formatted}.`, ['hot-news-impact-1']),
-      makeSection('game-of-the-week', `Game swing ${dossier.allowedNumericClaimsBySection['game-of-the-week'][1].formatted}.`, ['gotw-spread']),
-      makeSection('club-focus', `Club baseline ${dossier.allowedNumericClaimsBySection['club-focus'][0].formatted}.`, ['club-focus-top7']),
+      makeSection('game-of-the-week', `Game swing ${dossier.allowedNumericClaimsBySection['game-of-the-week'][0].formatted}.`, ['gotw-spread']),
+      makeSection('club-focus', 'Club focus stays qualitative.', []),
       makeSection('match-focus', `Match upside ${dossier.allowedNumericClaimsBySection['match-focus'][0].formatted}.`, ['match-focus-best-delta']),
       makeSection('perfect-weekend', `Best case ${dossier.allowedNumericClaimsBySection['perfect-weekend'][0].formatted} and ${dossier.allowedNumericClaimsBySection['perfect-weekend'][1].formatted}.`, [dossier.allowedNumericClaimsBySection['perfect-weekend'][0].id, dossier.allowedNumericClaimsBySection['perfect-weekend'][1].id]),
-      makeSection('summary', `Summary closes on ${dossier.allowedNumericClaimsBySection.summary[0].formatted}.`, ['newcastle-top7-baseline'], []),
+      makeSection('summary', 'Summary closes without restating the baseline.', [], []),
     ];
 
     expect(() => validateSections(dossier, sections)).not.toThrow();

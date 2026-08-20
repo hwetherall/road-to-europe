@@ -30,6 +30,14 @@ import {
   InjuryRecord,
 } from '@/lib/injuries';
 
+/**
+ * Vercel Hobby's function duration default and maximum are both 300s with fluid
+ * compute, so this export documents the ceiling rather than raising it. Stated
+ * explicitly because the path search is the longest-running work in the app:
+ * ~6.6s at Matchday 0 since it moved onto the paired engine, down from ~85s.
+ */
+export const maxDuration = 300;
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 const TOOLS: OpenRouterTool[] = [

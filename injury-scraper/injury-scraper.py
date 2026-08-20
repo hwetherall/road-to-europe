@@ -49,6 +49,10 @@ except ImportError:
 #     Must match the abbreviations used in your Keepwatch codebase
 # ---------------------------------------------------------------------------
 
+# Source of truth for club abbreviations is lib/clubs.ts. This copy exists only
+# because the scraper runs in Python; keep the two in step when clubs change.
+# Keepwatch abbreviations are NOT the providers' own codes (Brighton is BRI here,
+# BHA at football-data and ESPN; Chelsea is CFC, not CHE).
 CLUB_ABBR_MAP: dict[str, str] = {
     "Arsenal":              "ARS",
     "Aston Villa":          "AVL",
@@ -56,12 +60,18 @@ CLUB_ABBR_MAP: dict[str, str] = {
     "Bournemouth":          "BOU",
     "Brentford":            "BRE",
     "Brighton & Hove Albion": "BRI",
+    "Brighton and Hove Albion": "BRI",
     "Brighton":             "BRI",
-    "Burnley":              "BUR",
     "Chelsea":              "CFC",
+    "Coventry City":        "COV",
+    "Coventry":             "COV",
     "Crystal Palace":       "CRY",
     "Everton":              "EVE",
     "Fulham":               "FUL",
+    "Hull City":            "HUL",
+    "Hull":                 "HUL",
+    "Ipswich Town":         "IPS",
+    "Ipswich":              "IPS",
     "Leeds United":         "LEE",
     "Leeds":                "LEE",
     "Liverpool":            "LFC",
@@ -75,14 +85,12 @@ CLUB_ABBR_MAP: dict[str, str] = {
     "Nottingham Forest":    "NFO",
     "Nott'm Forest":        "NFO",
     "Sunderland":           "SUN",
+    "Sunderland AFC":       "SUN",
     "Tottenham Hotspur":    "TOT",
     "Tottenham":            "TOT",
     "Spurs":                "TOT",
-    "West Ham United":      "WHU",
-    "West Ham":             "WHU",
-    "Wolverhampton Wanderers": "WOL",
-    "Wolves":               "WOL",
 }
+
 
 
 def resolve_club_abbr(club_name: str) -> str | None:

@@ -1,42 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import { PlayerQuality } from './types';
+import { CLUBS } from '../clubs';
 
 // ── Club Name → Team Abbreviation Mapping ──
-// FIFA/FC uses short club names; our system uses 3-letter abbreviations
-
-const CLUB_TO_ABBR: Record<string, string> = {
-  // Exact names from FC26 dataset
-  'Arsenal': 'ARS',
-  'Manchester City': 'MCI',
-  'Manchester United': 'MUN',
-  'Aston Villa': 'AVL',
-  'Chelsea': 'CFC',
-  'Liverpool': 'LFC',
-  'Brentford': 'BRE',
-  'Fulham FC': 'FUL',
-  'Fulham': 'FUL',
-  'Everton': 'EVE',
-  'Brighton & Hove Albion': 'BRI',
-  'Brighton': 'BRI',
-  'Newcastle United': 'NEW',
-  'Newcastle': 'NEW',
-  'AFC Bournemouth': 'BOU',
-  'Bournemouth': 'BOU',
-  'Sunderland': 'SUN',
-  'Crystal Palace': 'CRY',
-  'Leeds United': 'LEE',
-  'Leeds': 'LEE',
-  'Tottenham Hotspur': 'TOT',
-  'Tottenham': 'TOT',
-  'Nottingham Forest': 'NFO',
-  "Nott'm Forest": 'NFO',
-  'West Ham United': 'WHU',
-  'West Ham': 'WHU',
-  'Burnley': 'BUR',
-  'Wolverhampton Wanderers': 'WOL',
-  'Wolves': 'WOL',
-};
+//
+// Derived from lib/clubs.ts. The FC dataset uses short club names, which is the
+// same shape as the bookmaker and ESPN feeds, so it shares the alias list rather
+// than keeping a fourth near-identical copy of it.
+const CLUB_TO_ABBR: Record<string, string> = Object.fromEntries(
+  CLUBS.flatMap((club) =>
+    [club.name, club.footballDataName, ...club.aliases].map((name) => [name, club.abbr])
+  )
+);
 
 // Reverse map: abbreviation → canonical FIFA club name (first matching entry)
 const ABBR_TO_CLUB: Record<string, string> = {};

@@ -7,6 +7,7 @@ import {
   simKey,
 } from '../sim/rng';
 import { GOAL_PARAMS, POINTS_BY_OUTCOME } from '../sim/goals';
+import { warnUnpricedFixtures } from '../sim/pricing';
 
 /**
  * Paired leverage scan.
@@ -25,12 +26,43 @@ import { GOAL_PARAMS, POINTS_BY_OUTCOME } from '../sim/goals';
  *     old one could not reach at all.
  *
  *  2. An EXACT standard error. Because both worlds are stepped together, we
- *     observe the per-simulation difference d in {-1, 0, +1} directly, so
- *     SE(delta) = sd(d)/sqrt(N) is measured rather than assumed. That matters:
- *     the signal from one fixture at 38 rounds remaining is roughly 0.2-0.4pp,
- *     and whether that is reportable depends entirely on the real error bar,
- *     which varies per fixture and per metric. A single global
- *     variance-reduction constant cannot capture it.
+ *     observe the per-simulation difference d directly, so SE(delta) =
+ *     sd(d)/sqrt(N) is measured rather than assumed. That matters: whether a
+ *     given swing is reportable depends entirely on the real error bar, which
+ *     varies per fixture and per metric. A single global variance-reduction
+ *     constant cannot capture it.
+ *
+ * CONDITIONING ON THE FIXTURE'S OWN DRAW
+ *
+ * Pairing alone leaves one avoidable source of variance. If the baseline is
+ * the season as drawn, then d = h_locked - h_natural carries the randomness of
+ * the locked fixture's OWN outcome draw: locking a home win only moves the
+ * needle in the (1 - p_home) of simulations where the fixture did not already
+ * come up a home win.
+ *
+ * That draw can be conditioned away. All three outcomes of the fixture are
+ * already patched and rank-scanned, so their hit indicators h_0, h_1, h_2 are
+ * in hand; the probability-weighted average
+ *
+ *     b = p_0*h_0 + p_1*h_1 + p_2*h_2
+ *
+ * is the conditional expectation of the baseline given the rest of the season.
+ * Using it in place of the sampled baseline is Rao-Blackwellisation: unbiased
+ * for the same estimand, with variance multiplied by exactly (1 - p_o) — a
+ * 1.75x reduction for a coin-flip lock, 4x for a heavy favourite. It is free,
+ * because it changes only how the three already-computed indicators are
+ * combined.
+ *
+ * The second benefit is the larger one. The sampled d takes values in
+ * {-1, 0, +1} and is nonzero in only `changedShare` of simulations; for
+ * championPct at Matchday 0 that share is small enough that the standard error
+ * is estimated off a handful of nonzero draws and is itself unreliable. The
+ * conditional d is continuous and nonzero in every pivotal simulation, so the
+ * error bar behaves for the rare-event metrics too.
+ *
+ * Applied to single-fixture candidates only: conditioning over a k-fixture
+ * bundle would need 3^k evaluations, and the month bundles in horizon.ts hold
+ * tens of fixtures. Bundles keep the sampled baseline. See `baselineKind`.
  */
 
 export type LockResult = 'home' | 'draw' | 'away';
@@ -64,6 +96,20 @@ export interface PairedDelta {
   lockedPct: number;
   /** Share of simulations in which the lock changed the target's outcome. */
   changedShare: number;
+  /**
+   * How the baseline this delta was measured against was formed.
+   *
+   * 'conditional' — Rao-Blackwellised: the baseline is the probability-weighted
+   * average of all three outcomes of the locked fixture, so the fixture's own
+   * outcome draw contributes no variance. Used for single-fixture candidates.
+   *
+   * 'sampled' — the baseline is the season as drawn, with the fixture at its
+   * natural outcome. Used for multi-fixture bundles, where conditioning would
+   * cost 3^k evaluations.
+   *
+   * Both are unbiased for the same quantity; only the variance differs.
+   */
+  baselineKind: 'conditional' | 'sampled';
 }
 
 export interface PairedScanResult {
@@ -143,6 +189,8 @@ export function pairedLeverageScan(params: {
   );
   const fixtureCount = scheduled.length;
 
+  warnUnpricedFixtures(scheduled, 'paired-scan');
+
   const homeIdx = new Int32Array(fixtureCount);
   const awayIdx = new Int32Array(fixtureCount);
   const homeProb = new Float64Array(fixtureCount);
@@ -196,7 +244,57 @@ export function pairedLeverageScan(params: {
   const sumDelta = new Float64Array(candidateCount);
   const sumDeltaSq = new Float64Array(candidateCount);
   const sumLocked = new Float64Array(candidateCount);
+  // Counted separately from sumDeltaSq: with a conditional baseline the delta
+  // is continuous, so E[d^2] no longer equals the share of simulations in which
+  // the lock flipped the target's outcome. changedShare must keep meaning that.
+  const changedCount = new Float64Array(candidateCount);
   let baselineHits = 0;
+
+  // ── Split candidates by whether the baseline can be conditioned ──
+  //
+  // Single-fixture candidates are grouped by fixture: one group evaluates all
+  // three outcomes of that fixture once, which is the same work the three
+  // separate candidates cost before, and yields both the conditional baseline
+  // and each outcome's own delta.
+  // Flattened to typed arrays rather than a Map of object arrays: this is read
+  // numSims x fixtureCount times, and object property access in that loop cost
+  // more than the conditioning saved.
+  const grouped = new Map<number, number[]>();
+  const bundles: number[] = [];
+
+  live.forEach((candidate, index) => {
+    if (candidate.fixtures.length === 1) {
+      const j = candidate.fixtures[0];
+      const group = grouped.get(j);
+      if (group) group.push(index);
+      else grouped.set(j, [index]);
+    } else {
+      bundles.push(index);
+    }
+  });
+
+  const groupCount = grouped.size;
+  const groupFixture = new Int32Array(groupCount);
+  const groupStart = new Int32Array(groupCount + 1);
+  const entryCandidate = new Int32Array(candidateCount);
+  const entryOutcome = new Int8Array(candidateCount);
+  const bundleIndices = Int32Array.from(bundles);
+
+  {
+    let g = 0;
+    let e = 0;
+    for (const [j, indices] of grouped) {
+      groupFixture[g] = j;
+      groupStart[g] = e;
+      for (const index of indices) {
+        entryCandidate[e] = index;
+        entryOutcome[e] = live[index].outcomes[0];
+        e++;
+      }
+      g++;
+    }
+    groupStart[groupCount] = e;
+  }
 
   // ── Per-simulation state, allocated once ──
   const points = new Float64Array(n);
@@ -210,6 +308,9 @@ export function pairedLeverageScan(params: {
   const maxLocks = live.reduce((m, c) => Math.max(m, c.fixtures.length), 0);
   const patchHome = new Int16Array(maxLocks);
   const patchAway = new Int16Array(maxLocks);
+
+  /** Metric hit under each of a single fixture's three outcomes. */
+  const outcomeHit = new Int8Array(3);
 
   // Scoreline draw writes into these rather than allocating a tuple per call —
   // this runs tens of millions of times.
@@ -295,8 +396,56 @@ export function pairedLeverageScan(params: {
     const baselineHit = metricHit(targetRank(), metric, n) ? 1 : 0;
     baselineHits += baselineHit;
 
-    // ── Each candidate as a patch on that same season ──
-    for (let c = 0; c < candidateCount; c++) {
+    // ── Single-fixture candidates: all three outcomes, conditional baseline ──
+    //
+    // The baseline contribution of fixture j is removed once, each outcome is
+    // applied in turn and scanned, and the fixture is then restored. Three rank
+    // scans per fixture — the same count the three separate candidates cost
+    // before — but they now also yield the conditional baseline b.
+    for (let gi = 0; gi < groupCount; gi++) {
+      const j = groupFixture[gi];
+
+      applyFixture(j, baseOutcome[j], baseHome[j], baseAway[j], -1);
+
+      for (let o = 0; o < 3; o++) {
+        if (o === baseOutcome[j]) {
+          // Reuse the baseline's own scoreline for the outcome it drew, which is
+          // what keeps the worlds paired rather than merely seeded.
+          drawnHome = baseHome[j];
+          drawnAway = baseAway[j];
+        } else {
+          drawScoreline(sim, j, o);
+        }
+        applyFixture(j, o, drawnHome, drawnAway, 1);
+        outcomeHit[o] = metricHit(targetRank(), metric, n) ? 1 : 0;
+        applyFixture(j, o, drawnHome, drawnAway, -1);
+      }
+
+      applyFixture(j, baseOutcome[j], baseHome[j], baseAway[j], 1);
+
+      // The outcome draw uses r < homeProb ? 0 : r < homeProb + drawProb ? 1 : 2,
+      // so the away probability is whatever is left. Clamped because the inputs
+      // are bookmaker-derived and need not sum to exactly one.
+      const pHome = homeProb[j];
+      const pDraw = drawProb[j];
+      const pAway = Math.max(0, 1 - pHome - pDraw);
+      const b = pHome * outcomeHit[0] + pDraw * outcomeHit[1] + pAway * outcomeHit[2];
+
+      const end = groupStart[gi + 1];
+      for (let e = groupStart[gi]; e < end; e++) {
+        const index = entryCandidate[e];
+        const hit = outcomeHit[entryOutcome[e]];
+        const d = hit - b;
+        sumLocked[index] += hit;
+        sumDelta[index] += d;
+        sumDeltaSq[index] += d * d;
+        if (hit !== baselineHit) changedCount[index] += 1;
+      }
+    }
+
+    // ── Multi-fixture bundles: sampled baseline, as before ──
+    for (let bi = 0; bi < bundleIndices.length; bi++) {
+      const c = bundleIndices[bi];
       const { fixtures: js, outcomes: os } = live[c];
       const lockCount = js.length;
 
@@ -322,6 +471,7 @@ export function pairedLeverageScan(params: {
       const d = lockedHit - baselineHit;
       sumDelta[c] += d;
       sumDeltaSq[c] += d * d;
+      if (d !== 0) changedCount[c] += 1;
 
       for (let k = lockCount - 1; k >= 0; k--) {
         const j = js[k];
@@ -347,7 +497,8 @@ export function pairedLeverageScan(params: {
       noiseFloorPp,
       belowNoiseFloor: Math.abs(deltaPp) <= noiseFloorPp,
       lockedPct: (sumLocked[c] / numSims) * 100,
-      changedShare: sumDeltaSq[c] / numSims,
+      changedShare: changedCount[c] / numSims,
+      baselineKind: candidate.fixtures.length === 1 ? 'conditional' : 'sampled',
     };
   });
 

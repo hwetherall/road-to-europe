@@ -50,10 +50,15 @@ function BelowNoiseFloor({
           <span className="font-semibold text-white/80">
             No individual fixture moves the needle yet.
           </span>{' '}
-          Across {summary.belowFloorCount} remaining fixtures, no single result changes{' '}
-          {teamName}&apos;s {metricLabel} by more than simulation noise
+          Across {summary.belowFloorCount} remaining fixtures, no single result is
+          confidently worth {summary.materialEffectPp.toFixed(1)}pp or more of{' '}
+          {teamName}&apos;s {metricLabel}
           {summary.medianNoiseFloorPp > 0 && (
-            <> (about {summary.medianNoiseFloorPp.toFixed(2)}pp at {summary.numSims.toLocaleString()} simulations)</>
+            <>
+              {' '}
+              (measured to about &plusmn;{summary.medianNoiseFloorPp.toFixed(2)}pp at{' '}
+              {summary.numSims.toLocaleString()} simulations)
+            </>
           )}
           .
         </div>
@@ -196,12 +201,8 @@ export default function SensitivityChart({
           <>
             {' '}
             {summary.belowFloorCount} further{' '}
-            {summary.belowFloorCount === 1 ? 'fixture is' : 'fixtures are'} hidden: their
-            swing is smaller than simulation noise
-            {summary.medianNoiseFloorPp > 0 && (
-              <> (~{summary.medianNoiseFloorPp.toFixed(2)}pp)</>
-            )}
-            .
+            {summary.belowFloorCount === 1 ? 'fixture is' : 'fixtures are'} hidden: not
+            confidently worth {summary.materialEffectPp.toFixed(1)}pp or more.
           </>
         )}
       </p>

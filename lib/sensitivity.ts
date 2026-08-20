@@ -6,6 +6,7 @@ import {
   Team,
 } from './types';
 import { LeverageCandidate, pairedLeverageScan } from './leverage/paired-scan';
+import { assessFloor } from './leverage/floor';
 
 /**
  * Fixed seed for every sensitivity run.
@@ -20,19 +21,53 @@ export const SENSITIVITY_SEED = 20260821;
 /**
  * Default simulation count.
  *
- * Chosen against measured cost and resolution on a 380-fixture Matchday 0
- * workload (380 fixtures x 3 outcomes = 1140 paired comparisons):
+ * Measured on a 380-fixture Matchday 0 workload (380 fixtures x 3 outcomes =
+ * 1140 paired comparisons), with the conditional baseline in paired-scan.ts:
  *
- *   1,000 sims   ~0.5 s   median noise floor 0.53 pp
- *   5,000 sims   ~2.4 s   median noise floor 0.24 pp
- *  20,000 sims   ~9.7 s   median noise floor 0.12 pp
+ *   5,000 sims   ~1.5 s   median noise floor 0.126 pp
+ *  20,000 sims   ~6.2 s   median noise floor 0.062 pp
  *
- * A single fixture is worth roughly 0.2-0.4 pp at 38 rounds remaining, so 1,000
- * sims cannot resolve one at all and 20,000 is too slow to run on the main
- * thread. 5,000 sits at the edge: the strongest fixtures clear their floor and
- * the rest are honestly reported as below it.
+ * 20,000 is affordable off the main thread but not on it. 5,000 is the ceiling
+ * for a click-to-interactive path, and at 0.126pp its resolution is no longer
+ * the binding constraint on what gets reported — the material-effect threshold
+ * below is. That is the intended state: the simulation budget should stop being
+ * what decides which fixtures a reader sees.
  */
 export const DEFAULT_SENSITIVITY_SIMS = 5000;
+
+/**
+ * The smallest swing worth showing a reader, in percentage points.
+ *
+ * EDITORIAL, NOT STATISTICAL. With 5,000 simulations the measured error bar is
+ * ~0.15pp, so a 0.3pp swing is comfortably resolvable — and still not a story.
+ * Testing against zero instead would report almost every fixture in the league,
+ * which is a list nobody can read and which implies a precision about
+ * *importance* that the model does not have.
+ *
+ * This threshold is what the scan tests against (see lib/leverage/floor.ts), and
+ * it is stated in the UI, because a fixture being hidden should be explained by
+ * a rule the reader can see rather than by an invisible one.
+ *
+ * MEASURED, and robust. Re-run against the real preseason priors (Matchday 0,
+ * 380 fixtures, target NEW, top7Pct, 5,000 sims) the delta distribution turns out
+ * to be sharply bimodal:
+ *
+ *   Newcastle's own 38 fixtures   5.56 - 8.63 pp   (median 6.68)
+ *   the other 300 fixtures        0.04 - 0.62 pp   (median 0.25)
+ *
+ * Nothing at all falls between 0.62 and 5.56pp. So every threshold from ~0.7 to
+ * ~5.5pp returns the same 38 fixtures, and this constant is not a knife-edge
+ * judgement — 1.0pp sits in the middle of an empty region. Below the gap the
+ * answer does change: 0.25pp admits 49 fixtures, the extra 11 being rivals'
+ * matches worth a quarter of a point each.
+ *
+ * The bimodality is the real finding. At 38 rounds remaining a club's own results
+ * dominate its fate by an order of magnitude over any single other result, and no
+ * amount of extra simulation changes that. It is also the measured case for the
+ * month-level bundles in leverage/horizon.ts: other clubs' results matter in
+ * aggregate, never individually.
+ */
+export const MATERIAL_EFFECT_PP = 1.0;
 
 const OUTCOMES = ['home', 'draw', 'away'] as const;
 
@@ -43,10 +78,16 @@ function candidateId(fixtureId: string, outcome: string): string {
 /**
  * Per-fixture leverage on `metric` for `targetTeam`, with a measured error bar.
  *
- * Fixtures whose largest swing does not clear their own noise floor are
- * excluded from `ranked` entirely — reporting a difference smaller than its
- * standard error is a category mistake, and the old EPSILON = 1e-9 filter
- * excluded nothing.
+ * `ranked` holds only the fixtures worth reporting: those confidently worth more
+ * than `materialEffectPp`, after controlling the false discovery rate across
+ * every comparison in the scan. Reported magnitudes are shrunk toward zero,
+ * because the top of a ranking over ~1,140 estimates is selected on noise as
+ * well as signal. See lib/leverage/floor.ts for why that replaced a plain
+ * two-sigma gate against zero.
+ *
+ * `belowNoiseFloor` is retained per fixture — the greedy path search and the
+ * horizon windows still need "is this distinguishable from zero at all" — but it
+ * is no longer what decides whether a reader sees a fixture.
  */
 export function sensitivityScanDetailed(
   teams: Team[],
@@ -54,7 +95,8 @@ export function sensitivityScanDetailed(
   targetTeam: string,
   numSims: number = DEFAULT_SENSITIVITY_SIMS,
   metric: SensitivityMetric = 'top7Pct',
-  seed: number = SENSITIVITY_SEED
+  seed: number = SENSITIVITY_SEED,
+  materialEffectPp: number = MATERIAL_EFFECT_PP
 ): SensitivityScanSummary {
   const scheduled = fixtures.filter((f) => f.status === 'SCHEDULED');
 
@@ -77,6 +119,18 @@ export function sensitivityScanDetailed(
 
   const byId = new Map(scan.results.map((r) => [r.candidateId, r]));
 
+  // Assess the WHOLE family at once — every fixture x outcome comparison, not
+  // the per-fixture maxima. The chart shows all three outcomes of every listed
+  // fixture, so all three are claims, and the multiplicity correction has to be
+  // over the set of claims actually made.
+  const assessment = assessFloor(
+    scan.results.map((r) => ({ deltaPp: r.deltaPp, sePp: r.sePp })),
+    materialEffectPp
+  );
+  const verdictById = new Map(
+    scan.results.map((r, i) => [r.candidateId, assessment.verdicts[i]])
+  );
+
   const measured: SensitivityResult[] = [];
   for (const fixture of scheduled) {
     const home = byId.get(candidateId(fixture.id, 'home'));
@@ -89,6 +143,13 @@ export function sensitivityScanDetailed(
     const strongest = [home, draw, away].reduce((a, b) =>
       Math.abs(b.deltaPp) > Math.abs(a.deltaPp) ? b : a
     );
+
+    // A fixture is worth showing if ANY of its three outcomes is, since the
+    // fixture is the unit the reader sees. The shrunk magnitude used for ranking
+    // comes from the strongest outcome, which is also the one whose error bar is
+    // reported, so the two stay consistent.
+    const verdicts = [home, draw, away].map((r) => verdictById.get(r.candidateId));
+    const strongestVerdict = verdictById.get(strongest.candidateId);
 
     measured.push({
       fixtureId: fixture.id,
@@ -105,12 +166,14 @@ export function sensitivityScanDetailed(
       sePp: strongest.sePp,
       noiseFloorPp: strongest.noiseFloorPp,
       belowNoiseFloor: Math.abs(strongest.deltaPp) <= strongest.noiseFloorPp,
+      shrunkMaxAbsDeltaPp: Math.abs(strongestVerdict?.shrunkDeltaPp ?? strongest.deltaPp),
+      reportable: verdicts.some((v) => v?.reportable === true),
     });
   }
 
   const ranked = measured
-    .filter((r) => !r.belowNoiseFloor)
-    .sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
+    .filter((r) => r.reportable)
+    .sort((a, b) => b.shrunkMaxAbsDeltaPp - a.shrunkMaxAbsDeltaPp);
 
   const floors = measured.map((r) => r.noiseFloorPp).sort((a, b) => a - b);
 
@@ -120,6 +183,11 @@ export function sensitivityScanDetailed(
     baselinePct: scan.baselinePct,
     medianNoiseFloorPp: floors.length > 0 ? floors[Math.floor(floors.length / 2)] : 0,
     numSims: scan.numSims,
+    materialEffectPp: assessment.materialEffectPp,
+    reportableComparisons: assessment.reportableCount,
+    comparisonCount: assessment.comparisonCount,
+    shrinkageWeight: assessment.shrinkageWeight,
+    tauPp: assessment.tauPp,
   };
 }
 
@@ -134,7 +202,16 @@ export function sensitivityScan(
   targetTeam: string,
   numSims: number = DEFAULT_SENSITIVITY_SIMS,
   metric: SensitivityMetric = 'top7Pct',
-  seed: number = SENSITIVITY_SEED
+  seed: number = SENSITIVITY_SEED,
+  materialEffectPp: number = MATERIAL_EFFECT_PP
 ): SensitivityResult[] {
-  return sensitivityScanDetailed(teams, fixtures, targetTeam, numSims, metric, seed).ranked;
+  return sensitivityScanDetailed(
+    teams,
+    fixtures,
+    targetTeam,
+    numSims,
+    metric,
+    seed,
+    materialEffectPp
+  ).ranked;
 }

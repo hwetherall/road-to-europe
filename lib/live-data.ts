@@ -2,12 +2,11 @@ import { Fixture, Team } from '@/lib/types';
 import {
   FALLBACK_FIXTURES_2025_26,
   FALLBACK_STANDINGS_2025_26,
-  ODDS_API_NAME_MAP,
-  TEAM_NAME_MAP,
 } from '@/lib/constants';
 import { averageBookmakerOdds } from '@/lib/odds-converter';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { teamElo, eloProb } from '@/lib/elo';
+import { abbrFor } from '@/lib/clubs';
 
 interface FootballDataMatchTeam {
   name: string;
@@ -95,12 +94,34 @@ export interface LiveSnapshot {
   };
 }
 
+/**
+ * football-data club -> Keepwatch abbreviation, loudly.
+ *
+ * The previous form was `TEAM_NAME_MAP[name] || tla`. That fallback is quiet in
+ * the worst way: standings and fixtures both take it, so the wrong abbreviation
+ * is used *consistently* and nothing looks broken. What actually happens is that
+ * the club misses every table keyed on the canonical abbreviation — the
+ * preseason priors, the colours, the bookmaker odds — so it gets simulated as if
+ * it were a promoted side. abbrFor() now also resolves football-data's own tla,
+ * so the fallback lands on the right club; reaching the last resort here means a
+ * genuinely unknown club and is worth an error in the log.
+ */
+function resolveClubAbbr(name: string | undefined, tla: string | undefined): string {
+  const resolved = abbrFor(name) ?? abbrFor(tla);
+  if (resolved) return resolved;
+  console.error(
+    `[live-data] Unknown club name="${name}" tla="${tla}". ` +
+      `It will have no preseason prior, no colour and no bookmaker odds. Add it to lib/clubs.ts.`
+  );
+  return tla ?? 'UNK';
+}
+
 function parseMatch(match: FootballDataMatch, index: number): Fixture {
   const score = match.score?.fullTime;
   return {
     id: String(match.id ?? index),
-    homeTeam: TEAM_NAME_MAP[match.homeTeam.name] || match.homeTeam.tla,
-    awayTeam: TEAM_NAME_MAP[match.awayTeam.name] || match.awayTeam.tla,
+    homeTeam: resolveClubAbbr(match.homeTeam.name, match.homeTeam.tla),
+    awayTeam: resolveClubAbbr(match.awayTeam.name, match.awayTeam.tla),
     matchday: match.matchday,
     date: match.utcDate,
     status: match.status === 'FINISHED' ? 'FINISHED' : 'SCHEDULED',
@@ -128,7 +149,7 @@ export async function getStandingsData(): Promise<DataSourceResult<Team[]>> {
             data: table.map((entry, index) => ({
               id: String(index + 1),
               name: entry.team.shortName || entry.team.name,
-              abbr: TEAM_NAME_MAP[entry.team.name] || entry.team.tla,
+              abbr: resolveClubAbbr(entry.team.name, entry.team.tla),
               points: entry.points,
               goalDifference: entry.goalDifference,
               goalsFor: entry.goalsFor,
@@ -254,8 +275,8 @@ export async function getLiveSnapshot(): Promise<LiveSnapshot> {
   const oddsLookup = new Map<string, OddsEntry>();
 
   for (const entry of oddsResult.data) {
-    const homeAbbr = ODDS_API_NAME_MAP[entry.homeTeam];
-    const awayAbbr = ODDS_API_NAME_MAP[entry.awayTeam];
+    const homeAbbr = abbrFor(entry.homeTeam);
+    const awayAbbr = abbrFor(entry.awayTeam);
     if (homeAbbr && awayAbbr) {
       oddsLookup.set(`${homeAbbr}-${awayAbbr}`, entry);
     }

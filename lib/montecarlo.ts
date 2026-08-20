@@ -1,5 +1,6 @@
 import { Team, Fixture, SimulationResult } from './types';
 import { GOAL_PARAMS } from './sim/goals';
+import { warnUnpricedFixtures } from './sim/pricing';
 import {
   hashRand,
   outcomeSubstream,
@@ -36,6 +37,7 @@ export function simulate(
 
   // Only process scheduled fixtures
   const scheduledFixtures = fixtures.filter((f) => f.status === 'SCHEDULED');
+  warnUnpricedFixtures(scheduledFixtures, 'montecarlo');
   const seeded = seed !== undefined;
 
   for (let sim = 0; sim < numSims; sim++) {

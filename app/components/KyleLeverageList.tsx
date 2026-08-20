@@ -35,11 +35,11 @@ export default function KyleLeverageList({
   const top5 = sensitivityResults.slice(0, 5);
 
   if (top5.length === 0) {
-    // The list arrives already filtered by each fixture's own noise floor, so
-    // an empty list means "nothing measurable", not "nothing computed".
+    // The list arrives already filtered for material effect, so an empty list
+    // means "nothing worth reporting", not "nothing computed".
     return (
       <div className="py-2 text-[10px] leading-4 text-white/30">
-        No single fixture&apos;s swing is larger than simulation noise yet.
+        No single fixture is confidently worth a percentage point yet.
       </div>
     );
   }

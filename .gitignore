@@ -32,6 +32,18 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...and without the leading dot. A file named plain `env` slipped past `.env*`
+# once and sat staged in the index with live API keys in it.
+env
+env.*
+
+# private keys and credential dumps, whatever they are called
+*key.md
+*-key.*
+*.pem
+*.p8
+*_rsa
+*.private
 
 # vercel
 .vercel
@@ -45,3 +57,7 @@ next-env.d.ts
 
 # FIFA/FC dataset (large CSV, download from Kaggle)
 /data/*.csv
+
+# python bytecode (injury scraper, modal scheduler)
+__pycache__/
+*.pyc

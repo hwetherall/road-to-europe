@@ -81,56 +81,11 @@ export const FALLBACK_FIXTURES_2025_26: Fixture[] = [
   { id: 'kf11', homeTeam: 'CRY', awayTeam: 'NEW', matchday: 33, date: '2026-04-04', status: 'SCHEDULED', homeWinProb: 0.341, drawProb: 0.272, awayWinProb: 0.387, probSource: 'odds_api' },
 ];
 
-// Team name mappings for API matching
-export const TEAM_NAME_MAP: Record<string, string> = {
-  'Arsenal FC': 'ARS',
-  'Manchester City FC': 'MCI',
-  'Manchester United FC': 'MUN',
-  'Aston Villa FC': 'AVL',
-  'Chelsea FC': 'CFC',
-  'Liverpool FC': 'LFC',
-  'Brentford FC': 'BRE',
-  'Fulham FC': 'FUL',
-  'Everton FC': 'EVE',
-  'Brighton & Hove Albion FC': 'BRI',
-  'Newcastle United FC': 'NEW',
-  'AFC Bournemouth': 'BOU',
-  'Sunderland AFC': 'SUN',
-  'Crystal Palace FC': 'CRY',
-  'Leeds United FC': 'LEE',
-  'Tottenham Hotspur FC': 'TOT',
-  'Nottingham Forest FC': 'NFO',
-  'West Ham United FC': 'WHU',
-  'Burnley FC': 'BUR',
-  'Wolverhampton Wanderers FC': 'WOL',
-};
-
-// the-odds-api.com uses shorter team names — map those to abbreviations too
-export const ODDS_API_NAME_MAP: Record<string, string> = {
-  'Arsenal': 'ARS',
-  'Manchester City': 'MCI',
-  'Manchester United': 'MUN',
-  'Aston Villa': 'AVL',
-  'Chelsea': 'CFC',
-  'Liverpool': 'LFC',
-  'Brentford': 'BRE',
-  'Fulham': 'FUL',
-  'Everton': 'EVE',
-  'Brighton and Hove Albion': 'BRI',
-  'Brighton': 'BRI',
-  'Newcastle United': 'NEW',
-  'Bournemouth': 'BOU',
-  'AFC Bournemouth': 'BOU',
-  'Sunderland': 'SUN',
-  'Crystal Palace': 'CRY',
-  'Leeds United': 'LEE',
-  'Leeds': 'LEE',
-  'Tottenham Hotspur': 'TOT',
-  'Tottenham': 'TOT',
-  'Nottingham Forest': 'NFO',
-  'West Ham United': 'WHU',
-  'West Ham': 'WHU',
-  'Burnley': 'BUR',
-  'Wolverhampton Wanderers': 'WOL',
-  'Wolves': 'WOL',
-};
+/**
+ * Club name mapping lives in lib/clubs.ts.
+ *
+ * TEAM_NAME_MAP and ODDS_API_NAME_MAP used to live here, one keyed on
+ * football-data's names and one on the-odds-api's. Both are now redundant:
+ * `abbrFor()` resolves any spelling from any source against a single registry,
+ * so there is nothing left for a per-source map to add.
+ */

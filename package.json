@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "priors:check": "PRIORS_CHECK=1 vitest run scripts/priors-check.test.ts --reporter=basic",
+    "ledger:publish": "LEDGER_PUBLISH=1 vitest run scripts/ledger-publish.test.ts --reporter=basic"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",

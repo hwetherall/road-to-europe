@@ -228,3 +228,124 @@ describe('pairedLeverageScan', () => {
     expect(bundle.deltaPp).toBeGreaterThan(single.deltaPp);
   }, 20_000);
 });
+
+describe('pairedLeverageScan conditional baseline', () => {
+  // The conditional baseline is the probability-weighted average of the three
+  // outcomes, so E[b] equals E[baselineHit] exactly: the natural draw picks one
+  // of the three h values with those same probabilities, and which one it picks
+  // is independent of the rest of the season. Therefore deltaPp must agree with
+  // lockedPct - baselinePct up to Monte Carlo error.
+  //
+  // This is the test that catches a wrong weighting — unnormalised probabilities,
+  // a swapped draw/away term, or conditioning on the wrong substream all break it
+  // while leaving the delta superficially plausible.
+  it('agrees with lockedPct - baselinePct, which pins the baseline weights', () => {
+    const { teams, fixtures } = buildScenario(0);
+    const candidates = singleFixtureCandidates(fixtures, 12);
+
+    const scan = pairedLeverageScan({
+      teams,
+      fixtures,
+      targetTeam: TARGET,
+      metric: METRIC,
+      candidates,
+      numSims: 20000,
+      seed: 4242,
+    });
+
+    expect(scan.results.length).toBe(candidates.length);
+
+    for (const r of scan.results) {
+      expect(r.baselineKind).toBe('conditional');
+      const impliedPp = r.lockedPct - scan.baselinePct;
+      // Both sides are Monte Carlo estimates; 4 x the reported SE is a generous
+      // band that still fails hard on a mis-weighted baseline.
+      const tolerance = Math.max(0.35, 4 * r.sePp);
+      expect(Math.abs(r.deltaPp - impliedPp)).toBeLessThan(tolerance);
+    }
+  }, 120000);
+
+  // Var of the sampled estimator is recoverable from the returned fields without
+  // a second code path: its per-simulation delta is an indicator, so
+  // E[d^2] = P(d != 0) = changedShare, giving Var = changedShare - mean^2.
+  //
+  // Conditioning on the locked fixture's own draw should multiply that variance
+  // by roughly (1 - p_outcome) — so the standard error ratio lands near
+  // sqrt(1 - p). Asserted as a band rather than a point, since the exact factor
+  // depends on how the three outcomes' hits differ in a given simulation.
+  it('reduces the standard error by about sqrt(1 - p) versus a sampled baseline', () => {
+    const { teams, fixtures } = buildScenario(0);
+    const scheduled = fixtures.filter((f) => f.status === 'SCHEDULED');
+    const numSims = 20000;
+
+    // Fixtures involving the target itself, where a lock is genuinely pivotal
+    // often enough for the comparison to be well estimated.
+    const targetFixtures = scheduled
+      .filter((f) => f.homeTeam === TARGET || f.awayTeam === TARGET)
+      .slice(0, 6);
+
+    const candidates: LeverageCandidate[] = targetFixtures.map((f) => ({
+      id: `${f.id}:home`,
+      locks: [{ fixtureId: f.id, result: 'home' as const }],
+    }));
+
+    const scan = pairedLeverageScan({
+      teams,
+      fixtures,
+      targetTeam: TARGET,
+      metric: METRIC,
+      candidates,
+      numSims,
+      seed: 909,
+    });
+
+    let compared = 0;
+    for (let i = 0; i < scan.results.length; i++) {
+      const r = scan.results[i];
+      const pHome = targetFixtures[i].homeWinProb as number;
+
+      const meanD = r.deltaPp / 100;
+      const sampledVar = r.changedShare - meanD * meanD;
+      if (sampledVar <= 0) continue;
+      const sampledSePp = Math.sqrt(sampledVar / numSims) * 100;
+
+      // Variance reduction must be real, not just claimed.
+      expect(r.sePp).toBeLessThan(sampledSePp);
+
+      const ratio = r.sePp / sampledSePp;
+      const predicted = Math.sqrt(1 - pHome);
+      expect(ratio).toBeGreaterThan(predicted * 0.5);
+      expect(ratio).toBeLessThan(predicted * 1.5);
+      compared++;
+    }
+
+    expect(compared).toBeGreaterThan(2);
+  }, 120000);
+
+  // Bundles cannot be conditioned without 3^k evaluations, so they must keep the
+  // sampled baseline and say so.
+  it('labels multi-fixture bundles as sampled', () => {
+    const { teams, fixtures } = buildScenario(0);
+    const scheduled = fixtures.filter((f) => f.status === 'SCHEDULED').slice(0, 4);
+
+    const scan = pairedLeverageScan({
+      teams,
+      fixtures,
+      targetTeam: TARGET,
+      metric: METRIC,
+      candidates: [
+        { id: 'single', locks: [{ fixtureId: scheduled[0].id, result: 'home' }] },
+        {
+          id: 'bundle',
+          locks: scheduled.slice(0, 3).map((f) => ({ fixtureId: f.id, result: 'home' as const })),
+        },
+      ],
+      numSims: 3000,
+      seed: 77,
+    });
+
+    const byId = new Map(scan.results.map((r) => [r.candidateId, r]));
+    expect(byId.get('single')?.baselineKind).toBe('conditional');
+    expect(byId.get('bundle')?.baselineKind).toBe('sampled');
+  }, 120000);
+});

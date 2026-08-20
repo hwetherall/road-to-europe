@@ -10,7 +10,8 @@ import {
   TeamContext,
 } from '@/lib/types';
 import { Chapter } from '@/lib/chat-types';
-import { FALLBACK_SEASON, ODDS_API_NAME_MAP } from '@/lib/constants';
+import { FALLBACK_SEASON } from '@/lib/constants';
+import { abbrFor } from '@/lib/clubs';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { simulate } from '@/lib/montecarlo';
 import { DEFAULT_SENSITIVITY_SIMS, SENSITIVITY_SEED, sensitivityScanDetailed } from '@/lib/sensitivity';
@@ -22,7 +23,7 @@ import {
 } from '@/lib/leverage/horizon';
 import { getTeamContext } from '@/lib/team-context';
 import { getTeamColour, getTeamTextColour } from '@/lib/team-colours';
-import { teamElo, eloProb } from '@/lib/elo';
+import { teamElo, eloProb, priorWeight } from '@/lib/elo';
 import { applyChapters } from '@/lib/modification-engine';
 import {
   addChapter,
@@ -434,7 +435,16 @@ function WeeklyReportsPanel({
               Weekly Reports
             </div>
             <div className="mt-1 text-[12px] text-white/28">
-              Previews and roundups generated for Newcastle.
+              Previews and roundups generated for Newcastle.{' '}
+              {/* Permanent link, by design: the Ledger is only worth anything if it
+                  stays reachable after it stops flattering the model. */}
+              <a
+                href="/ledger"
+                className="border-b border-dotted border-white/25 text-white/45 transition-colors hover:text-white/75"
+              >
+                The Preseason Ledger
+              </a>{' '}
+              records what the model believed before a ball was kicked.
             </div>
           </div>
           {latest && (
@@ -511,6 +521,46 @@ function WeeklyReportsPanel({
   );
 }
 
+/**
+ * How much of the projection is evidence and how much is assumption.
+ *
+ * Not decoration. At Matchday 0 every number on this page comes from the
+ * preseason prior, because no match has been played — and a reader has no way to
+ * know that a 20% top-7 figure in August is a different kind of claim from the
+ * same figure in April. Driven by priorWeight(), the same function the ratings
+ * blend uses, so the statement cannot drift from what the model actually did.
+ */
+function ModelConfidence({ played, accentColor }: { played: number; accentColor: string }) {
+  const priorPct = Math.round(priorWeight(played) * 100);
+  const evidencePct = 100 - priorPct;
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-5 text-white/40">
+      <span className="font-oswald text-[10px] uppercase tracking-[0.16em] text-white/30">
+        Model confidence
+      </span>
+      <span className="font-mono" style={{ color: `${accentColor}cc` }}>
+        {evidencePct}% evidence
+      </span>
+      <span className="text-white/20">/</span>
+      <span className="font-mono text-white/50">{priorPct}% preseason prior</span>
+      <span className="text-white/25">
+        ({played} {played === 1 ? 'match' : 'matches'} played)
+      </span>
+      <span
+        className="cursor-help border-b border-dotted border-white/20 text-white/30"
+        title={
+          played === 0
+            ? 'No matches have been played, so every projection here rests entirely on preseason ratings: last season\u2019s table shrunk toward the league average, plus the betting market for the three promoted clubs. These numbers will move a lot once results arrive.'
+            : `Team strength is a blend of preseason expectations and this season\u2019s results, weighted by how much evidence ${played} matches actually represent. The prior and the results carry equal weight at 12 matches; before that the prior dominates.`
+        }
+      >
+        what this means
+      </span>
+    </div>
+  );
+}
+
 function MetricOverview({
   result,
   baselineResult,
@@ -518,6 +568,7 @@ function MetricOverview({
   hasActiveChapters,
   accentColor,
   numSims,
+  played,
 }: {
   result: SimulationResult;
   baselineResult: SimulationResult | null;
@@ -525,6 +576,7 @@ function MetricOverview({
   hasActiveChapters: boolean;
   accentColor: string;
   numSims: number;
+  played: number;
 }) {
   const primary = cards[0];
   if (!primary) return null;
@@ -587,6 +639,7 @@ function MetricOverview({
             style={{ width: `${Math.min(primaryValue, 100)}%`, background: barColor }}
           />
         </div>
+        <ModelConfidence played={played} accentColor={accentColor} />
       </div>
 
       {secondary.length > 0 && (
@@ -889,8 +942,8 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
         const oddsData = await oddsRes.json();
         if (oddsData.odds?.length > 0) {
           for (const o of oddsData.odds as OddsEntry[]) {
-            const homeAbbr = ODDS_API_NAME_MAP[o.homeTeam];
-            const awayAbbr = ODDS_API_NAME_MAP[o.awayTeam];
+            const homeAbbr = abbrFor(o.homeTeam);
+            const awayAbbr = abbrFor(o.awayTeam);
             if (homeAbbr && awayAbbr) {
               oddsLookup.set(`${homeAbbr}-${awayAbbr}`, o);
             }
@@ -1543,6 +1596,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
                 hasActiveChapters={hasActiveChapters}
                 accentColor={accentColor}
                 numSims={SIM_COUNT}
+                played={currentTeam?.played ?? 0}
               />
             ) : staleData ? (
               <StaleDataOverview />

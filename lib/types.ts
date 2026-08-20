@@ -64,19 +64,50 @@ export interface SensitivityResult {
   noiseFloorPp: number;
   /** True when maxAbsDelta is not distinguishable from zero at ~95%. */
   belowNoiseFloor: boolean;
+  /**
+   * maxAbsDelta after empirical-Bayes shrinkage, in percentage points. The
+   * ranking uses this rather than the raw value: the top of a list selected from
+   * ~1,140 noisy estimates is biased upward, and shrinkage is the correction.
+   */
+  shrunkMaxAbsDeltaPp: number;
+  /**
+   * True when this fixture's strongest outcome survives the relevance test —
+   * confidently worth more than the material-effect threshold, after controlling
+   * the false discovery rate across the whole scan. This, not belowNoiseFloor,
+   * decides whether a fixture is shown. See lib/leverage/floor.ts.
+   */
+  reportable: boolean;
 }
 
 /** A sensitivity scan plus the context needed to report honestly on it. */
 export interface SensitivityScanSummary {
-  /** Fixtures whose swing clears their own noise floor, strongest first. */
+  /** Fixtures worth reporting, strongest shrunk swing first. */
   ranked: SensitivityResult[];
-  /** Fixtures measured but suppressed because their swing was indistinguishable from noise. */
+  /** Fixtures measured but not shown — immaterial, or not confidently material. */
   belowFloorCount: number;
   /** The target metric's baseline value, in percent. */
   baselinePct: number;
   /** Median noise floor across all fixtures measured, for UI copy. */
   medianNoiseFloorPp: number;
   numSims: number;
+  /**
+   * The editorial relevance threshold in percentage points: the smallest swing
+   * considered worth a reader's attention. Shown in the UI, because a suppressed
+   * fixture should be explained by a stated rule rather than a silent one.
+   */
+  materialEffectPp: number;
+  /** Comparisons (fixture x outcome) that survived, and how many were tested. */
+  reportableComparisons: number;
+  comparisonCount: number;
+  /**
+   * Mean empirical-Bayes shrinkage weight across the scan. Near 1 means the
+   * spread of real effects dwarfs the error bars, so the ranking is
+   * signal-driven rather than selection-driven — a diagnostic worth surfacing
+   * rather than a knob.
+   */
+  shrinkageWeight: number;
+  /** Estimated spread of true effects across the scan, in percentage points. */
+  tauPp: number;
 }
 
 export type SensitivityMetric =

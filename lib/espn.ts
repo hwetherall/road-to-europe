@@ -1,4 +1,5 @@
 import { Fixture } from '@/lib/types';
+import { CLUBS } from './clubs';
 
 // ── Public Types ──
 
@@ -70,43 +71,15 @@ interface RawESPNEvent {
 
 // ── Team Mapping ──
 //
-// Built from TEAM_NAME_MAP / ODDS_API_NAME_MAP in lib/constants.ts, verified
-// against actual ESPN scoreboard responses. Unmatched display names log a
-// warning at parse time rather than silently defaulting.
-
-const ESPN_TEAM_MAP: Record<string, string> = {
-  Arsenal: 'ARS',
-  'Aston Villa': 'AVL',
-  Bournemouth: 'BOU',
-  'AFC Bournemouth': 'BOU',
-  Brentford: 'BRE',
-  Brighton: 'BRI',
-  'Brighton & Hove Albion': 'BRI',
-  'Brighton and Hove Albion': 'BRI',
-  Burnley: 'BUR',
-  Chelsea: 'CFC',
-  'Crystal Palace': 'CRY',
-  Everton: 'EVE',
-  Fulham: 'FUL',
-  Leeds: 'LEE',
-  'Leeds United': 'LEE',
-  Liverpool: 'LFC',
-  'Manchester City': 'MCI',
-  'Manchester United': 'MUN',
-  Newcastle: 'NEW',
-  'Newcastle United': 'NEW',
-  'Nottingham Forest': 'NFO',
-  "Nott'm Forest": 'NFO',
-  Sunderland: 'SUN',
-  'Sunderland AFC': 'SUN',
-  Tottenham: 'TOT',
-  'Tottenham Hotspur': 'TOT',
-  'West Ham': 'WHU',
-  'West Ham United': 'WHU',
-  Wolves: 'WOL',
-  Wolverhampton: 'WOL',
-  'Wolverhampton Wanderers': 'WOL',
-};
+// Derived from lib/clubs.ts, whose alias lists include every ESPN displayName
+// and shortDisplayName observed from the eng.1/teams endpoint. Unmatched display
+// names still log a warning below rather than silently defaulting — ESPN's own
+// abbreviations disagree with Keepwatch's for six clubs.
+const ESPN_TEAM_MAP: Record<string, string> = Object.fromEntries(
+  CLUBS.flatMap((club) =>
+    [club.name, club.footballDataName, ...club.aliases].map((name) => [name, club.abbr])
+  )
+);
 
 const unmappedTeamsLogged = new Set<string>();
 

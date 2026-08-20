@@ -19,6 +19,19 @@ const PLAUSIBILITY_WEIGHT = 0.35;
 /** Simulations per greedy step. Ranking work, so cheaper than the main scan. */
 const GREEDY_SIMS = 1000;
 
+/**
+ * How many of the ranked fixtures the greedy search will consider as next-lock
+ * candidates.
+ *
+ * This is a COMPUTE CAP, NOT A STATISTICAL FINDING. It bounds the branching
+ * factor of the search; it says nothing about how many fixtures cleared their
+ * noise floor. A previous handoff read the resulting "15" as a measurement of
+ * measurable leverage at Matchday 0 and drew a conclusion from it — the number
+ * would have been 15 whether 15 fixtures cleared or all 380 did. The scan's own
+ * `belowFloorCount` / `ranked.length` are the measurement.
+ */
+const MAX_GREEDY_CANDIDATES = 15;
+
 // ── Helpers ──
 
 function applyLocks(fixtures: Fixture[], locks: FixtureLock[]): Fixture[] {
@@ -136,7 +149,14 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
   // Only fixtures that clear their own measured noise floor are candidates. In
   // August that list can legitimately be short or empty, in which case the
   // greedy search below finds no path rather than optimising against noise.
-  const topFixtures = sensitivity.slice(0, 15);
+  const topFixtures = sensitivity.slice(0, MAX_GREEDY_CANDIDATES);
+  if (sensitivity.length > MAX_GREEDY_CANDIDATES) {
+    console.warn(
+      `[path-search] ${sensitivity.length} fixtures are reportable; the greedy ` +
+        `search considers the top ${MAX_GREEDY_CANDIDATES}. ` +
+        `${sensitivity.length - MAX_GREEDY_CANDIDATES} dropped for compute, not for significance.`
+    );
+  }
 
   // ── Step 3: Greedy optimal path ──
   function buildGreedyPath(

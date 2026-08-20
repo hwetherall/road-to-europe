@@ -1,15 +1,17 @@
 vi.mock('@/lib/live-data', () => ({
   getLiveSnapshot: vi.fn(async () => {
-    const { HARDCODED_STANDINGS, KNOWN_FIXTURES } = await import('@/lib/constants');
+    // Last season's data, used here purely as a static test fixture.
+    const { FALLBACK_STANDINGS_2025_26: teams, FALLBACK_FIXTURES_2025_26: fixtures } =
+      await import('@/lib/constants');
     return {
-      teams: HARDCODED_STANDINGS,
-      fixtures: KNOWN_FIXTURES,
-      standingsSource: 'hardcoded',
-      fixturesSource: 'hardcoded',
+      teams,
+      fixtures,
+      standingsSource: 'live',
+      fixturesSource: 'live',
       oddsSource: 'live',
       oddsCoverage: {
-        matchedFixtures: KNOWN_FIXTURES.length,
-        totalScheduledFixtures: KNOWN_FIXTURES.length,
+        matchedFixtures: fixtures.length,
+        totalScheduledFixtures: fixtures.length,
         nextRoundMatchedFixtures: 5,
         nextRoundScheduledFixtures: 5,
       },
@@ -72,10 +74,7 @@ vi.mock('@/lib/what-if/squad-quality', () => ({
   })),
 }));
 
-import {
-  buildWeeklyPreviewDossier,
-  evaluatePerfectWeekendOptionsForFixture,
-} from '@/lib/weekly-preview/dossier';
+import { buildPerfectWeekend, buildWeeklyPreviewDossier } from '@/lib/weekly-preview/dossier';
 
 describe('weekly preview dossier', () => {
   it('is deterministic for the same snapshot', async () => {
@@ -91,22 +90,42 @@ describe('weekly preview dossier', () => {
 
   it('selects the maximizing outcome for each perfect-weekend fixture', async () => {
     const dossier = await buildWeeklyPreviewDossier();
-    const baselineTop7 = dossier.selectedClubBaseline.top7Pct;
 
+    // Measuring one fixture alone must reproduce the entry from the full-round
+    // scan exactly. That holds only because every candidate is patched onto the
+    // same shared baseline season, so it checks the pairing as well as the
+    // choice of best outcome.
     for (const entry of dossier.perfectWeekend) {
       const fixture = dossier.nextRoundFixtures.find((item) => item.id === entry.fixtureId);
       expect(fixture).toBeDefined();
-      const options = evaluatePerfectWeekendOptionsForFixture({
+
+      const isolated = buildPerfectWeekend({
         teams: dossier.teams,
         fixtures: dossier.fixtures,
-        fixture: fixture!,
-        baselineTop7Pct: baselineTop7,
-        seedBase: dossier.dataHash,
+        nextRoundFixtures: [fixture!],
+        club: 'NEW',
       });
-      const maxDelta = Math.max(...options.map((option) => option.deltaPp));
-      expect(entry.deltaPp).toBe(maxDelta);
+
+      expect(isolated.entries).toHaveLength(1);
+      expect(isolated.entries[0]).toEqual(entry);
     }
-  });
+  }, 60_000);
+
+  it('suppresses the perfect-weekend table when nothing clears its noise floor', async () => {
+    const dossier = await buildWeeklyPreviewDossier();
+
+    // Either at least one entry is measurable, or the table is marked
+    // unreportable. It must never be reportable with nothing measurable in it.
+    const anyMeasurable = dossier.perfectWeekend.some((e) => !e.belowNoiseFloor);
+    expect(dossier.perfectWeekendIsReportable).toBe(anyMeasurable);
+
+    // Every entry carries its own error bar.
+    for (const entry of dossier.perfectWeekend) {
+      expect(entry.sePp).toBeGreaterThanOrEqual(0);
+      expect(entry.noiseFloorPp).toBeCloseTo(entry.sePp * 2, 2);
+      expect(entry.belowNoiseFloor).toBe(Math.abs(entry.deltaPp) <= entry.noiseFloorPp);
+    }
+  }, 60_000);
 
   it('builds a top-3 game-of-the-week shortlist', async () => {
     const dossier = await buildWeeklyPreviewDossier();

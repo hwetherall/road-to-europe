@@ -1,6 +1,24 @@
 import { Team, Fixture } from './types';
 
 export const TARGET_TEAM = 'NEW';
+
+/** The season Keepwatch is modelling. Update this once, in August. */
+export const CURRENT_SEASON = '2026-27';
+
+/** Calendar year the current season kicked off in. */
+export const SEASON_START_YEAR = Number(CURRENT_SEASON.slice(0, 4));
+
+/**
+ * The season before CURRENT_SEASON. Derived rather than written out so the two
+ * cannot drift apart — the research prompts reason about the boundary between
+ * them, and getting it wrong sends the agents looking at the wrong year.
+ */
+export const PREVIOUS_SEASON = `${SEASON_START_YEAR - 1}-${String(
+  SEASON_START_YEAR % 100
+).padStart(2, '0')}`;
+
+/** The season the fallback constants below were captured from. */
+export const FALLBACK_SEASON = '2025-26';
 export const TOTAL_MATCHDAYS = 38;
 export const NUM_TEAMS = 20;
 
@@ -12,8 +30,15 @@ export const EUROPEAN_ZONES = {
   relegation: { min: 18, label: 'Relegation', color: '#ef4444' },
 } as const;
 
-// Real EPL standings as of March 21, 2026
-export const HARDCODED_STANDINGS: Team[] = [
+/**
+ * FINAL-ISH 2025-26 STANDINGS — NOT CURRENT DATA.
+ *
+ * Captured 21 March 2026. Retained only so the app has something to render
+ * shape-wise when football-data.org is unreachable. Any code path that reaches
+ * this must set dataSource to 'stale-fallback', show the stale-data banner, and
+ * suppress the simulation. Never compute a probability from this table.
+ */
+export const FALLBACK_STANDINGS_2025_26: Team[] = [
   { id: '1', abbr: 'ARS', name: 'Arsenal', points: 70, goalDifference: 42, goalsFor: 68, goalsAgainst: 26, played: 31, won: 21, drawn: 7, lost: 3 },
   { id: '2', abbr: 'MCI', name: 'Man City', points: 61, goalDifference: 31, goalsFor: 62, goalsAgainst: 31, played: 30, won: 19, drawn: 4, lost: 7 },
   { id: '3', abbr: 'MUN', name: 'Man United', points: 55, goalDifference: 18, goalsFor: 52, goalsAgainst: 34, played: 31, won: 16, drawn: 7, lost: 8 },
@@ -36,8 +61,13 @@ export const HARDCODED_STANDINGS: Team[] = [
   { id: '20', abbr: 'WOL', name: 'Wolves', points: 17, goalDifference: -38, goalsFor: 20, goalsAgainst: 58, played: 31, won: 4, drawn: 5, lost: 22 },
 ];
 
-// Known upcoming fixtures with bookmaker probabilities
-export const KNOWN_FIXTURES: Fixture[] = [
+/**
+ * 2025-26 MATCHDAY 32-33 FIXTURES — NOT CURRENT DATA.
+ *
+ * Dated March/April 2026 with baked-in bookmaker probabilities. Same rule as
+ * FALLBACK_STANDINGS_2025_26: display-only, never simulated.
+ */
+export const FALLBACK_FIXTURES_2025_26: Fixture[] = [
   { id: 'kf1', homeTeam: 'EVE', awayTeam: 'CFC', matchday: 32, date: '2026-03-28', status: 'SCHEDULED', homeWinProb: 0.325, drawProb: 0.278, awayWinProb: 0.397, probSource: 'odds_api' },
   { id: 'kf2', homeTeam: 'LEE', awayTeam: 'BRE', matchday: 32, date: '2026-03-28', status: 'SCHEDULED', homeWinProb: 0.388, drawProb: 0.278, awayWinProb: 0.334, probSource: 'odds_api' },
   { id: 'kf3', homeTeam: 'NEW', awayTeam: 'SUN', matchday: 32, date: '2026-03-28', status: 'SCHEDULED', homeWinProb: 0.571, drawProb: 0.241, awayWinProb: 0.188, probSource: 'odds_api' },

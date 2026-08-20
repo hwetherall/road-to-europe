@@ -1,16 +1,91 @@
 'use client';
 
-import { SensitivityMetric, SensitivityResult, Team } from '@/lib/types';
+import {
+  SensitivityMetric,
+  SensitivityResult,
+  SensitivityScanSummary,
+  Team,
+} from '@/lib/types';
+import { ScoredLeverageWindow } from '@/lib/leverage/horizon';
 
 interface Props {
   results: SensitivityResult[];
   selectedTeam: string;
   teams: Team[];
   metricLabel: string;
+  summary?: SensitivityScanSummary | null;
+  leverageWindows?: ScoredLeverageWindow[];
   baselineValue?: number | null;
   metricOptions?: { key: SensitivityMetric; label: string }[];
   activeMetric?: SensitivityMetric;
   onMetricChange?: (metric: SensitivityMetric) => void;
+}
+
+/**
+ * Shown when no single fixture's swing clears its own measured noise floor —
+ * the expected state early in a season. Says so plainly, and falls back to the
+ * window-level view rather than ranking noise.
+ */
+function BelowNoiseFloor({
+  summary,
+  windows,
+  teamName,
+  metricLabel,
+}: {
+  summary: SensitivityScanSummary;
+  windows: ScoredLeverageWindow[];
+  teamName: string;
+  metricLabel: string;
+}) {
+  const above = windows.filter((w) => !w.belowNoiseFloor).slice(0, 6);
+  const unitLabel = windows[0]?.unit === 'matchday' ? 'matchday' : 'month';
+
+  return (
+    <div className="mb-8">
+      <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
+        Games That Matter
+      </h2>
+      <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4">
+        <div className="text-[12.5px] leading-5 text-white/60">
+          <span className="font-semibold text-white/80">
+            No individual fixture moves the needle yet.
+          </span>{' '}
+          Across {summary.belowFloorCount} remaining fixtures, no single result changes{' '}
+          {teamName}&apos;s {metricLabel} by more than simulation noise
+          {summary.medianNoiseFloorPp > 0 && (
+            <> (about {summary.medianNoiseFloorPp.toFixed(2)}pp at {summary.numSims.toLocaleString()} simulations)</>
+          )}
+          .
+        </div>
+        {above.length > 0 && (
+          <>
+            <div className="mt-3 mb-2 text-[10px] uppercase tracking-[0.14em] text-white/32">
+              {unitLabel}-level leverage instead
+            </div>
+            <div className="space-y-1.5">
+              {above.map((w) => (
+                <div key={w.id} className="flex items-baseline justify-between gap-3 text-[12px]">
+                  <span className="text-white/70">{w.label}</span>
+                  <span className="shrink-0 font-mono text-white/45">
+                    <span className="text-emerald-400/90">
+                      {w.deltaPp >= 0 ? '+' : ''}
+                      {w.deltaPp.toFixed(1)}pp
+                    </span>
+                    <span className="text-white/25"> &plusmn;{w.sePp.toFixed(2)}</span>
+                    <span className="text-white/25"> &middot; {w.fixtureCount} matches</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2.5 text-[10.5px] leading-4 text-white/28">
+              Each window assumes every match involving {teamName} or a close rival falls
+              their way. The swing is the aggregate, with its measured standard error.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function getTeamName(abbr: string, teams: Team[]): string {
@@ -22,6 +97,8 @@ export default function SensitivityChart({
   selectedTeam,
   teams,
   metricLabel,
+  summary,
+  leverageWindows = [],
   metricOptions,
   activeMetric,
   onMetricChange,
@@ -53,13 +130,23 @@ export default function SensitivityChart({
   const teamName = getTeamName(selectedTeam, teams);
 
   if (displayRows.length === 0) {
+    if (summary && summary.belowFloorCount > 0) {
+      return (
+        <BelowNoiseFloor
+          summary={summary}
+          windows={leverageWindows}
+          teamName={teamName}
+          metricLabel={metricLabel}
+        />
+      );
+    }
     return (
       <div className="mb-8">
         <h2 className="font-oswald text-sm tracking-[0.15em] uppercase text-white/50 mb-2">
           Games That Matter
         </h2>
         <div className="border rounded-lg p-4 bg-white/[0.02] border-white/[0.08] text-xs text-white/50">
-          No high-leverage fixtures for this metric right now.
+          No remaining fixtures to measure for this metric.
         </div>
       </div>
     );
@@ -105,6 +192,18 @@ export default function SensitivityChart({
       </div>
       <p className="text-xs text-white/30 mb-4">
         How much {teamName}&apos;s {metricLabel} change depending on the result.
+        {summary && summary.belowFloorCount > 0 && (
+          <>
+            {' '}
+            {summary.belowFloorCount} further{' '}
+            {summary.belowFloorCount === 1 ? 'fixture is' : 'fixtures are'} hidden: their
+            swing is smaller than simulation noise
+            {summary.medianNoiseFloorPp > 0 && (
+              <> (~{summary.medianNoiseFloorPp.toFixed(2)}pp)</>
+            )}
+            .
+          </>
+        )}
       </p>
       <div className="space-y-2">
         {displayRows.map((r) => {

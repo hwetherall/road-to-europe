@@ -35,9 +35,11 @@ export default function KyleLeverageList({
   const top5 = sensitivityResults.slice(0, 5);
 
   if (top5.length === 0) {
+    // The list arrives already filtered by each fixture's own noise floor, so
+    // an empty list means "nothing measurable", not "nothing computed".
     return (
-      <div className="text-[10px] text-white/30 py-2">
-        No high-leverage fixtures found
+      <div className="py-2 text-[10px] leading-4 text-white/30">
+        No single fixture&apos;s swing is larger than simulation noise yet.
       </div>
     );
   }

@@ -1,6 +1,7 @@
 // ── Fact-Check Prompts ──
 
 import type { ExtractedClaim } from '@/lib/weekly-preview/fact-check-types';
+import { CURRENT_SEASON } from '@/lib/constants';
 import type { WeeklyPreviewSectionArtifact } from '@/lib/weekly-preview/types';
 
 // ────────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ export const CLAIM_VERIFICATION_SYSTEM_PROMPT = `You are a Premier League claim 
 
 Critical instructions:
 - DO NOT rely on your training data for player transfers, squad membership, manager appointments, injuries, suspensions, or any time-sensitive football facts. Your training data may be stale.
-- Use web search for EVERY claim. Search for current 2025-26 season information.
+- Use web search for EVERY claim. Search for current ${CURRENT_SEASON} season information.
 - Prefer authoritative sources in this priority order:
   1. Official club websites (e.g. nufc.co.uk, arsenal.com)
   2. premierleague.com

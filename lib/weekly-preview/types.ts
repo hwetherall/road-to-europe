@@ -71,6 +71,12 @@ export interface WeeklyPreviewPerfectWeekendEntry {
   resultLabel: string;
   deltaPp: number;
   resultingTop7Pct: number;
+  /** Measured standard error of deltaPp, in percentage points. */
+  sePp: number;
+  /** Two-sided ~95% reporting threshold: 2 x sePp. */
+  noiseFloorPp: number;
+  /** True when deltaPp is not distinguishable from zero. */
+  belowNoiseFloor: boolean;
 }
 
 export interface WeeklyPreviewContestSnapshot {
@@ -118,6 +124,15 @@ export interface WeeklyPreviewDossier {
   roundsRemaining: number;
   perfectWeekend: WeeklyPreviewPerfectWeekendEntry[];
   perfectWeekendCumulativeDeltaPp: number;
+  /**
+   * False when no fixture in the round has a swing larger than its own
+   * simulation noise — the expected state early in a season. The table is a
+   * list of fixture-level deltas, so when none of them exist it must not be
+   * rendered at all.
+   */
+  perfectWeekendIsReportable: boolean;
+  /** Standard error of the cumulative swing, propagated across the entries. */
+  perfectWeekendCumulativeSePp: number;
   approvedStorylines: string[];
   warnings: string[];
   sources: WeeklyPreviewSourceRef[];

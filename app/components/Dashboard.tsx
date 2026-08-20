@@ -5,15 +5,21 @@ import {
   Team,
   Fixture,
   SimulationResult,
-  SensitivityResult,
   SensitivityMetric,
+  SensitivityScanSummary,
   TeamContext,
 } from '@/lib/types';
 import { Chapter } from '@/lib/chat-types';
-import { HARDCODED_STANDINGS, KNOWN_FIXTURES, ODDS_API_NAME_MAP } from '@/lib/constants';
+import { FALLBACK_SEASON, ODDS_API_NAME_MAP } from '@/lib/constants';
 import { generateRemainingFixtures } from '@/lib/fixture-generator';
 import { simulate } from '@/lib/montecarlo';
-import { sensitivityScan } from '@/lib/sensitivity';
+import { DEFAULT_SENSITIVITY_SIMS, SENSITIVITY_SEED, sensitivityScanDetailed } from '@/lib/sensitivity';
+import {
+  ScoredLeverageWindow,
+  roundsRemaining as computeRoundsRemaining,
+  scoreLeverageWindows,
+  selectLeverageUnit,
+} from '@/lib/leverage/horizon';
 import { getTeamContext } from '@/lib/team-context';
 import { getTeamColour, getTeamTextColour } from '@/lib/team-colours';
 import { teamElo, eloProb } from '@/lib/elo';
@@ -39,7 +45,12 @@ import WhatIfAnalysis from './WhatIfAnalysis';
 import SignupForm from './SignupForm';
 
 const SIM_COUNT = 10000;
-const SENSITIVITY_SIMS = 1000;
+const SENSITIVITY_SIMS = DEFAULT_SENSITIVITY_SIMS;
+/**
+ * Fixed seed for the displayed probabilities, so pressing Re-run on unchanged
+ * data reproduces the same numbers instead of jittering by a few tenths.
+ */
+const SIM_SEED = SENSITIVITY_SEED;
 const REPORT_STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const SENSITIVITY_METRIC_LABELS: Record<SensitivityMetric, string> = {
   championPct: 'title odds',
@@ -655,6 +666,48 @@ function MetricOverview({
   );
 }
 
+/**
+ * Persistent, non-dismissible. The whole point is that a reader cannot mistake
+ * last season's table for this season's, and cannot dismiss the warning and
+ * keep reading numbers — because in this state there are no numbers.
+ */
+function StaleDataBanner() {
+  return (
+    <div
+      role="alert"
+      className="border-b border-amber-400/25 bg-amber-400/[0.07] px-4 py-3 sm:px-6"
+    >
+      <div className="mx-auto flex max-w-[920px] items-start gap-3">
+        <span aria-hidden className="mt-[1px] text-[13px] leading-none text-amber-300/90">&#9888;</span>
+        <div className="text-[12.5px] leading-5 text-amber-100/85">
+          <span className="font-semibold">Live data unavailable</span> &mdash; showing{' '}
+          {FALLBACK_SEASON} final standings.{' '}
+          <span className="font-semibold">These are not current.</span>
+          <div className="mt-0.5 text-[11.5px] text-amber-100/55">
+            Projections are suppressed until live data returns. A wrong number is
+            worse than no number.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StaleDataOverview() {
+  return (
+    <section className="mb-8 rounded-lg border border-white/[0.07] bg-white/[0.018] p-8 text-center">
+      <div className="font-oswald text-[13px] uppercase tracking-[0.14em] text-white/58">
+        Projections unavailable
+      </div>
+      <div className="mx-auto mt-2 max-w-[420px] text-[12px] leading-5 text-white/32">
+        Keepwatch could not reach live standings or fixtures, so there is nothing
+        current to simulate. Nothing on this page is being computed from the{' '}
+        {FALLBACK_SEASON} table shown above.
+      </div>
+    </section>
+  );
+}
+
 function OverviewLoading({ phase, accentColor }: { phase: string; accentColor: string }) {
   return (
     <section className="mb-8 rounded-lg border border-white/[0.07] bg-white/[0.018] p-8 text-center">
@@ -673,14 +726,18 @@ function OverviewLoading({ phase, accentColor }: { phase: string; accentColor: s
 }
 
 export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: DashboardProps) {
-  const [teams, setTeams] = useState<Team[]>(HARDCODED_STANDINGS);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string>(initialTeam);
   const [simResults, setSimResults] = useState<SimulationResult[] | null>(null);
-  const [sensitivityResults, setSensitivityResults] = useState<SensitivityResult[] | null>(null);
+  const [sensitivity, setSensitivity] = useState<SensitivityScanSummary | null>(null);
+  const [leverageWindows, setLeverageWindows] = useState<ScoredLeverageWindow[] | null>(null);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<string>('');
   const [dataSource, setDataSource] = useState<string>('');
+  // True when any part of the snapshot fell back to last season's data. In this
+  // state we render a banner and no probabilities at all — see the spec's 1.0.
+  const [staleData, setStaleData] = useState(false);
   const [activeFeature, setActiveFeature] = useState<DashboardFeature | null>(null);
 
   // What-If state
@@ -725,11 +782,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
     [weeklyReports]
   );
 
-  const allFixtures = useMemo(() => {
-    if (fixtures.length > 0) return fixtures;
-    const generated = generateRemainingFixtures(HARDCODED_STANDINGS, KNOWN_FIXTURES);
-    return [...KNOWN_FIXTURES, ...generated];
-  }, [fixtures]);
+  const allFixtures = fixtures;
 
   // Baseline result for selected team (no chapters)
   const baselineTeamResult = useMemo(
@@ -804,9 +857,14 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
     window.history.replaceState({}, '', url.toString());
   }, []);
 
-  const fetchData = useCallback(async (): Promise<{ teams: Team[]; fixtures: Fixture[] }> => {
+  const fetchData = useCallback(async (): Promise<{
+    teams: Team[];
+    fixtures: Fixture[];
+    stale: boolean;
+  }> => {
     let nextTeams = teams;
     let nextFixtures: Fixture[] = [];
+    let stale = false;
 
     try {
       const [standingsRes, fixturesRes, oddsRes] = await Promise.all([
@@ -821,6 +879,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
           nextTeams = standingsData.teams;
           setTeams(nextTeams);
           setDataSource(standingsData.source);
+          if (standingsData.source === 'stale-fallback') stale = true;
         }
       }
 
@@ -841,6 +900,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
 
       if (fixturesRes.ok) {
         const fixturesData = await fixturesRes.json();
+        if (fixturesData.source === 'stale-fallback') stale = true;
         if (fixturesData.fixtures?.length > 0) {
           const known = fixturesData.fixtures.map((fixture: Fixture) => {
             if (fixture.status === 'FINISHED') return fixture;
@@ -885,23 +945,63 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
         }
       }
     } catch {
-      setDataSource('hardcoded');
+      setDataSource('stale-fallback');
+      stale = true;
     }
 
-    if (nextFixtures.length === 0) {
-      nextFixtures = [...KNOWN_FIXTURES, ...generateRemainingFixtures(nextTeams, KNOWN_FIXTURES)];
-      setFixtures(nextFixtures);
-    }
+    // Deliberately no fallback fixture synthesis here. If the fetch failed we have
+    // nothing current to simulate, and an empty state is honest where last
+    // season's fixtures dressed up as this season's are not.
+    setStaleData(stale);
 
-    return { teams: nextTeams, fixtures: nextFixtures };
+    return { teams: nextTeams, fixtures: nextFixtures, stale };
   }, [teams]);
 
+  // One leverage pass: per-fixture deltas with measured error bars, plus the
+  // window-level view for whatever horizon we are at. Both come from the same
+  // paired engine and the same seed.
+  const runLeverage = useCallback(
+    (
+      nextTeams: Team[],
+      nextFixtures: Fixture[],
+      target: string,
+      metric: SensitivityMetric
+    ): { summary: SensitivityScanSummary; windows: ScoredLeverageWindow[] } => {
+      const summary = sensitivityScanDetailed(
+        nextTeams,
+        nextFixtures,
+        target,
+        SENSITIVITY_SIMS,
+        metric,
+        SENSITIVITY_SEED
+      );
+
+      const unit = selectLeverageUnit(computeRoundsRemaining(nextFixtures));
+      const windows =
+        unit === 'fixture'
+          ? []
+          : scoreLeverageWindows({
+              teams: nextTeams,
+              fixtures: nextFixtures,
+              targetTeam: target,
+              metric,
+              unit,
+              numSims: SENSITIVITY_SIMS,
+              seed: SENSITIVITY_SEED,
+            });
+
+      return { summary, windows };
+    },
+    []
+  );
+
   const runSimulation = useCallback(() => {
+    if (staleData || teams.length === 0 || allFixtures.length === 0) return;
     setRunning(true);
     setPhase('Running base simulation...');
 
     setTimeout(() => {
-      const results = simulate(teams, allFixtures, SIM_COUNT);
+      const results = simulate(teams, allFixtures, SIM_COUNT, SIM_SEED);
       setSimResults(results);
 
       // Compute correct metric from fresh results
@@ -913,35 +1013,30 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
       setPhase('Running sensitivity analysis...');
 
       setTimeout(() => {
-        const sensitivity = sensitivityScan(
-          teams,
-          allFixtures,
-          selectedTeam,
-          SENSITIVITY_SIMS,
-          correctMetric
-        );
-        setSensitivityResults(sensitivity);
+        const { summary, windows } = runLeverage(teams, allFixtures, selectedTeam, correctMetric);
+        setSensitivity(summary);
+        setLeverageWindows(windows);
         setRunning(false);
         setPhase('');
       }, 50);
     }, 50);
-  }, [teams, allFixtures, selectedTeam, sensitivityMetric]);
+  }, [teams, allFixtures, selectedTeam, sensitivityMetric, staleData, runLeverage]);
 
   // Re-simulate with chapters applied (debounced)
   const runChapterSim = useCallback(() => {
     if (chapterTimerRef.current) clearTimeout(chapterTimerRef.current);
 
-    if (activeChapters.length === 0) {
+    if (activeChapters.length === 0 || staleData) {
       setModifiedSimResults(null);
       return;
     }
 
     chapterTimerRef.current = setTimeout(() => {
       const modifiedFixtures = applyChapters(allFixtures, chapters);
-      const results = simulate(teams, modifiedFixtures, SIM_COUNT);
+      const results = simulate(teams, modifiedFixtures, SIM_COUNT, SIM_SEED);
       setModifiedSimResults(results);
     }, 120);
-  }, [activeChapters.length, chapters, allFixtures, teams]);
+  }, [activeChapters.length, chapters, allFixtures, teams, staleData]);
 
   // Re-run chapter simulation when chapters change
   useEffect(() => {
@@ -959,12 +1054,13 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
 
   // Auto-fetch + simulate on mount
   useEffect(() => {
-    fetchData().then(({ teams: fetchedTeams, fixtures: fetchedFixtures }) => {
+    fetchData().then(({ teams: fetchedTeams, fixtures: fetchedFixtures, stale }) => {
+      if (stale || fetchedTeams.length === 0 || fetchedFixtures.length === 0) return;
       setTimeout(() => {
         setRunning(true);
         setPhase('Running base simulation...');
         setTimeout(() => {
-          const results = simulate(fetchedTeams, fetchedFixtures, SIM_COUNT);
+          const results = simulate(fetchedTeams, fetchedFixtures, SIM_COUNT, SIM_SEED);
           setSimResults(results);
 
           // Compute correct sensitivity metric from actual sim results
@@ -974,16 +1070,16 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
           const ctx = teamData ? getTeamContext(teamData, fetchedTeams, teamResult ?? undefined) : null;
           const correctMetric = ctx?.primaryMetric ?? 'top7Pct';
 
-          setPhase('Running sensitivity analysis...');
+          setPhase('Measuring leverage...');
           setTimeout(() => {
-            const sensitivity = sensitivityScan(
+            const { summary, windows } = runLeverage(
               fetchedTeams,
               fetchedFixtures,
               initialTeam,
-              SENSITIVITY_SIMS,
               correctMetric
             );
-            setSensitivityResults(sensitivity);
+            setSensitivity(summary);
+            setLeverageWindows(windows);
             setRunning(false);
             setPhase('');
           }, 50);
@@ -997,16 +1093,16 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
   useEffect(() => {
     if (!simResults || running) return;
 
-    setPhase('Updating sensitivity...');
+    setPhase('Updating leverage...');
     setTimeout(() => {
-      const sensitivity = sensitivityScan(
+      const { summary, windows } = runLeverage(
         teams,
         allFixtures,
         selectedTeam,
-        SENSITIVITY_SIMS,
         sensitivityMetric
       );
-      setSensitivityResults(sensitivity);
+      setSensitivity(summary);
+      setLeverageWindows(windows);
       setPhase('');
     }, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1310,6 +1406,8 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
         shifted={shiftForSidebar}
       />
 
+      {staleData && <StaleDataBanner />}
+
       <FeatureStrip
         activeFeature={activeFeature}
         lockedCount={lockedCount}
@@ -1333,7 +1431,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
             teams={teams}
             displayResult={displayResult}
             baselineResult={baselineTeamResult}
-            sensitivityResults={sensitivityResults}
+            sensitivityResults={sensitivity?.ranked ?? null}
             cards={teamContext.relevantCards}
             hasActiveChapters={hasActiveChapters}
             accentColor={accentColor}
@@ -1446,6 +1544,8 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
                 accentColor={accentColor}
                 numSims={SIM_COUNT}
               />
+            ) : staleData ? (
+              <StaleDataOverview />
             ) : (
               <OverviewLoading phase={phase} accentColor={accentColor} />
             )}
@@ -1469,7 +1569,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
                   onToggleLock={handleToggleLock}
                   onResetAll={handleResetLocks}
                   selectedTeam={selectedTeam}
-                  sensitivityResults={sensitivityResults}
+                  sensitivityResults={sensitivity?.ranked ?? null}
                   teams={teams}
                   displayResult={displayResult}
                   baselineResult={baselineTeamResult}
@@ -1481,9 +1581,11 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
             )}
 
             {/* Sensitivity Chart */}
-            {sensitivityResults && (
+            {sensitivity && (
               <SensitivityChart
-                results={sensitivityResults}
+                results={sensitivity.ranked}
+                summary={sensitivity}
+                leverageWindows={leverageWindows ?? []}
                 selectedTeam={selectedTeam}
                 teams={teams}
                 metricLabel={sensitivityMetricLabel}
@@ -1495,7 +1597,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
             )}
 
             {/* Report CTA — nudge after sensitivity data */}
-            {sensitivityResults && deepDivePreview.status !== 'ready' && (
+            {sensitivity && deepDivePreview.status !== 'ready' && (
               <div className="mb-8 rounded-xl border border-teal-400/20 bg-gradient-to-br from-teal-400/[0.06] to-transparent p-5">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div>
@@ -1603,7 +1705,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
           selectedTeam={selectedTeam}
           teams={teams}
           accentColor={accentColor}
-          sensitivityResults={sensitivityResults}
+          sensitivityResults={sensitivity?.ranked ?? null}
           baselineResult={baselineTeamResult}
           modifiedResult={modifiedTeamResult}
         />
@@ -1622,7 +1724,7 @@ export default function Dashboard({ initialTeam = 'NEW', weeklyReports = [] }: D
         teams={teams}
         fixtures={allFixtures}
         selectedTeamResult={baselineTeamResult}
-        sensitivityResults={sensitivityResults}
+        sensitivityResults={sensitivity?.ranked ?? null}
         sensitivityMetric={sensitivityMetric}
         forceRefreshRequestKey={deepAnalysisForceRefreshKey}
         onReportGenerated={() => setDeepDivePreviewRefreshKey((key) => key + 1)}

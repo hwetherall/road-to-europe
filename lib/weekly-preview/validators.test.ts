@@ -4,16 +4,18 @@ import { WeeklyPreviewSectionArtifact } from '@/lib/weekly-preview/types';
 
 vi.mock('@/lib/live-data', () => ({
   getLiveSnapshot: vi.fn(async () => {
-    const { HARDCODED_STANDINGS, KNOWN_FIXTURES } = await import('@/lib/constants');
+    // Last season's data, used here purely as a static test fixture.
+    const { FALLBACK_STANDINGS_2025_26: teams, FALLBACK_FIXTURES_2025_26: fixtures } =
+      await import('@/lib/constants');
     return {
-      teams: HARDCODED_STANDINGS,
-      fixtures: KNOWN_FIXTURES,
-      standingsSource: 'hardcoded',
-      fixturesSource: 'hardcoded',
+      teams,
+      fixtures,
+      standingsSource: 'live',
+      fixturesSource: 'live',
       oddsSource: 'live',
       oddsCoverage: {
-        matchedFixtures: KNOWN_FIXTURES.length,
-        totalScheduledFixtures: KNOWN_FIXTURES.length,
+        matchedFixtures: fixtures.length,
+        totalScheduledFixtures: fixtures.length,
         nextRoundMatchedFixtures: 5,
         nextRoundScheduledFixtures: 5,
       },

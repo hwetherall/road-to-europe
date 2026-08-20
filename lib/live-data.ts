@@ -1,7 +1,7 @@
 import { Fixture, Team } from '@/lib/types';
 import {
-  HARDCODED_STANDINGS,
-  KNOWN_FIXTURES,
+  FALLBACK_FIXTURES_2025_26,
+  FALLBACK_STANDINGS_2025_26,
   ODDS_API_NAME_MAP,
   TEAM_NAME_MAP,
 } from '@/lib/constants';
@@ -78,7 +78,7 @@ export interface OddsEntry {
 
 export interface DataSourceResult<T> {
   data: T;
-  source: 'live' | 'hardcoded' | 'error' | 'none';
+  source: 'live' | 'stale-fallback' | 'error' | 'none';
 }
 
 export interface LiveSnapshot {
@@ -147,7 +147,8 @@ export async function getStandingsData(): Promise<DataSourceResult<Team[]>> {
     }
   }
 
-  return { data: HARDCODED_STANDINGS, source: 'hardcoded' };
+  // Last season's table. Callers MUST surface this as stale and suppress the sim.
+  return { data: FALLBACK_STANDINGS_2025_26, source: 'stale-fallback' };
 }
 
 export async function getFixturesData(): Promise<DataSourceResult<Fixture[]>> {
@@ -186,7 +187,8 @@ export async function getFixturesData(): Promise<DataSourceResult<Fixture[]>> {
     }
   }
 
-  return { data: KNOWN_FIXTURES, source: 'hardcoded' };
+  // Last season's fixtures, dated March/April 2026. Stale — see above.
+  return { data: FALLBACK_FIXTURES_2025_26, source: 'stale-fallback' };
 }
 
 export async function getOddsData(): Promise<DataSourceResult<OddsEntry[]>> {

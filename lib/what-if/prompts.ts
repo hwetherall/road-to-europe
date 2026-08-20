@@ -1,4 +1,5 @@
 import { Team, Fixture } from '../types';
+import { CURRENT_SEASON, PREVIOUS_SEASON, SEASON_START_YEAR } from '../constants';
 import { CounterfactualScenario, PlayerQuality } from './types';
 import { loadFIFAData } from './fifa-data';
 
@@ -28,12 +29,12 @@ export function buildTemporalContext(teams: Team[], fixtures: Fixture[]): string
   return `## CRITICAL: TEMPORAL CONTEXT — READ THIS FIRST
 
 Today's date: ${currentDate}
-Current season: 2025-26 Premier League
+Current season: ${CURRENT_SEASON} Premier League
 Gameweek: ~${maxPlayed} of 38
 Fixtures completed: ${completed} of 380
 Fixtures remaining: ${remaining}
 
-### AUTHORITATIVE CURRENT STANDINGS (2025-26)
+### AUTHORITATIVE CURRENT STANDINGS (${CURRENT_SEASON})
 These standings are LIVE DATA from football-data.org. They are CORRECT.
 If ANY web search result contradicts these standings, the web result is
 STALE or refers to a DIFFERENT SEASON. Discard it.
@@ -44,24 +45,26 @@ ${standingsTable}
 \`\`\`
 
 ### SEASON DISAMBIGUATION RULES
-1. The CURRENT season is 2025-26. We are in March 2026.
-2. The PREVIOUS season was 2024-25. It ended in May 2025.
-3. When you search, ALWAYS include "2025-26" in your query.
+1. The CURRENT season is ${CURRENT_SEASON}. Today's date is at the top of
+   this block — use it, do not assume a month.
+2. The PREVIOUS season was ${PREVIOUS_SEASON}. It ended in May ${SEASON_START_YEAR}.
+3. When you search, ALWAYS include "${CURRENT_SEASON}" in your query.
 4. If a search result mentions league positions that don't match the
    table above, it is from a DIFFERENT SEASON. Ignore it.
-5. Transfers that happened "last summer" means summer 2025 (between
-   2024-25 and 2025-26 seasons).
+5. Transfers that happened "last summer" means summer ${SEASON_START_YEAR}
+   (between the ${PREVIOUS_SEASON} and ${CURRENT_SEASON} seasons).
 6. Players who left a club "at the end of last season" means they left
-   in May-August 2025 and are NOT at the club for 2025-26.
+   in May-August ${SEASON_START_YEAR} and are NOT at the club for ${CURRENT_SEASON}.
 
 ### COMMON TRAPS TO AVOID
-- Nottingham Forest finished 7th in 2024-25. Check their CURRENT position
-  in the table above before referencing them.
-- Players who were at a club in 2024-25 may have transferred. ALWAYS
-  verify with the FIFA dataset (compare_squads tool) or web search
-  with "2025-26" in the query.
-- Managers change between seasons. Search "[team] manager 2025-26" not
-  just "[team] manager".
+- A club's finishing position last season tells you nothing about where
+  they sit now. Check the CURRENT position in the table above before
+  characterising any club as strong, struggling, or a rival.
+- Players who were at a club in ${PREVIOUS_SEASON} may have transferred.
+  ALWAYS verify with the squad dataset (compare_squads tool) or web search
+  with "${CURRENT_SEASON}" in the query.
+- Managers change between seasons. Search "[team] manager ${CURRENT_SEASON}"
+  not just "[team] manager".
 
 ### LEAGUE STRUCTURE REMINDERS
 - Positions 18th, 19th, and 20th ARE the relegation zone. Being 18th
@@ -106,8 +109,10 @@ export async function buildSquadContext(
   const formatPlayer = (p: PlayerQuality) =>
     `${p.name} (${p.overall} OVR, age ${p.age}, ${p.positions.join('/')})`;
 
-  return `## VERIFIED SQUAD: ${teamName} (2025-26 season)
-Source: FIFA/FC 26 dataset (reflects current season rosters)
+  return `## SQUAD SNAPSHOT: ${teamName}
+Source: FIFA/FC 26 dataset. NOTE: this snapshot predates the
+${SEASON_START_YEAR} summer window, so it may not reflect ${CURRENT_SEASON}
+arrivals or departures. Treat it as a baseline to verify, not as ground truth.
 Average overall: ${avgOverall} | Starting XI average: ${avgStarting}
 
 ### Current Squad (by overall rating)
@@ -118,9 +123,11 @@ SQUAD PLAYERS (12-22):
 ${bench.map((p, i) => `${i + 12}. ${formatPlayer(p)}`).join('\n')}
 
 ### SQUAD VERIFICATION RULES
-1. ONLY the players listed above are confirmed at ${teamName} for 2025-26.
-2. If you want to reference a player NOT on this list, they are NOT at
-   the club. They may have transferred. Check with web_search if needed.
+1. The players listed above were at ${teamName} as of the snapshot date.
+   For ${CURRENT_SEASON} status, verify with web_search before relying on it.
+2. If you want to reference a player NOT on this list, do not assume they
+   are at the club. Confirm with web_search first — they may be a
+   ${SEASON_START_YEAR} signing the snapshot missed, or long gone.
 3. "Keeping" a departed player is a VALID COUNTERFACTUAL — but you must
    label it correctly: "What if ${teamName} had kept [player] instead of
    selling them?" not "What if [player] is used differently?"
@@ -138,7 +145,7 @@ function buildDepartedPlayersSection(
 ): string {
   if (!departedPlayers || departedPlayers.length === 0) return '';
 
-  return `\n## DEPARTED PLAYERS (left before 2025-26 season)
+  return `\n## DEPARTED PLAYERS (left before the ${CURRENT_SEASON} season)
 These players are NO LONGER at ${teamName}. Referencing them
 as current players is a CRITICAL ERROR. You may propose "What if we
 had kept [player]?" as a counterfactual — label it correctly.
@@ -253,7 +260,7 @@ You have two tools:
 
 ## ADDITIONAL DIAGNOSIS TASK: DEPARTED PLAYERS
 As part of your diagnosis, use web_search to identify any significant
-players who LEFT ${ctx.teamName} between the 2024-25 and 2025-26 seasons.
+players who LEFT ${ctx.teamName} between the ${PREVIOUS_SEASON} and ${CURRENT_SEASON} seasons.
 For each departed player, note:
 - Player name and position
 - Where they went and for how much (if known)
@@ -339,7 +346,7 @@ When you call run_simulation, it returns:
 
 ## YOUR MISSION
 ${ctx.teamName} currently sits ${ctx.position}th with ${ctx.points}
-points from ${38 - ctx.gamesRemaining} games in the ACTUAL 2025-26 season.
+points from ${38 - ctx.gamesRemaining} games in the ACTUAL ${CURRENT_SEASON} season.
 
 Their full-season baseline simulation (no modifications) gives them
 ${ctx.baselineExpectedPoints?.toFixed(1) ?? '??'} expected points and
@@ -358,7 +365,7 @@ Key bottlenecks: ${ctx.bottlenecks.join(', ')}
 ## YOUR TOOLS
 1. **compare_squads** — Compare squad quality numerically
 2. **lookup_player** — Get FIFA ratings for specific players
-3. **web_search** — Verify transfers, fees, availability (ALWAYS include "2025-26")
+3. **web_search** — Verify transfers, fees, availability (ALWAYS include "${CURRENT_SEASON}")
 4. **run_simulation** — Run FULL-SEASON Monte Carlo (10K sims). USE THIS FOR EVERY SCENARIO.
 5. **evaluate_plausibility** — Score each scenario's realism
 6. **store_scenario** — Save scenarios worth including
@@ -396,7 +403,7 @@ Because modifications now apply across ALL 38 games, the impact is larger:
 1. NEVER claim an impact without running run_simulation.
 2. NEVER reference a player as being at ${ctx.teamName} unless they
    appear in the VERIFIED SQUAD section above.
-3. ALL web searches must include "2025-26" when referencing teams.
+3. ALL web searches must include "${CURRENT_SEASON}" when referencing teams.
 4. Departed players can be "kept" as counterfactuals — label them correctly.
 5. Be HARSH with plausibility scores. Fantasy scenarios get 0-5/100.
 
@@ -412,7 +419,7 @@ Output valid JSON:
 \`\`\``,
 
     user: `Explore counterfactual scenarios for ${ctx.teamName} achieving
-${ctx.targetLabel} in the 2025-26 Premier League season. Start by
+${ctx.targetLabel} in the ${CURRENT_SEASON} Premier League season. Start by
 running the baseline simulation, then work through at least 5 scenarios
 of increasing ambition. Store each one.
 
@@ -453,9 +460,9 @@ For each scenario, verify:
 3. What are the second-order effects? Would deprioritising Europe anger sponsors? Would a new signing disrupt team chemistry?
 
 ## TEMPORAL REMINDER
-All scenarios are about the 2025-26 season. When stress-testing:
+All scenarios are about the ${CURRENT_SEASON} season. When stress-testing:
 - Check if proposed signings actually moved clubs in summer 2025
-- Verify managers are correct for 2025-26 (not 2024-25)
+- Verify managers are correct for ${CURRENT_SEASON} (not ${PREVIOUS_SEASON})
 - If a scenario says "keep [player]", verify that player actually LEFT
   the club — check the DEPARTED PLAYERS list.
 - If a scenario references a rival's strength, verify against the
@@ -466,7 +473,7 @@ Flag any scenario that:
 - References a player not in the VERIFIED SQUAD list as being at the club
 - Assumes a rival is strong/weak based on LAST season's position
 - Claims a player "was sold mid-season" when they actually left between seasons
-- Assumes European competition participation that didn't happen in 2025-26
+- Assumes European competition participation that didn't happen in ${CURRENT_SEASON}
 
 ## OUTPUT FORMAT
 Output valid JSON:
@@ -722,7 +729,7 @@ Output valid JSON:
 }
 \`\`\``,
 
-    user: `Write the counterfactual analysis for ${ctx.teamName} targeting "${ctx.targetLabel}" in the 2025-26 Premier League season.
+    user: `Write the counterfactual analysis for ${ctx.teamName} targeting "${ctx.targetLabel}" in the ${CURRENT_SEASON} Premier League season.
 
 ## FULL-SEASON BASELINE (no modifications)
 Expected points: ${ctx.baselineExpectedPoints?.toFixed(1) ?? '?'}

@@ -1,9 +1,12 @@
 import { createHash } from 'crypto';
+import { CURRENT_SEASON } from '@/lib/constants';
 import { getTeamContext } from '@/lib/team-context';
 import { simulateFull } from '@/lib/server-simulation';
 import { Fixture, SimulationResult, Team } from '@/lib/types';
 import { getLiveSnapshot, LiveSnapshot } from '@/lib/live-data';
 import { computeSquadProfile } from '@/lib/what-if/squad-quality';
+import { LeverageCandidate, pairedLeverageScan } from '@/lib/leverage/paired-scan';
+import { SENSITIVITY_SEED } from '@/lib/sensitivity';
 import { buildResearchBundle } from '@/lib/weekly-preview/research';
 import {
   GameOfWeekCandidate,
@@ -17,24 +20,19 @@ import {
 
 const PREVIEW_SIM_COUNT = 4000;
 
-function mulberry32(seed: number) {
-  return function random() {
-    let t = (seed += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** Simulations behind the Perfect Weekend table. */
+const PERFECT_WEEKEND_SIMS = 8000;
 
-function withSeededRandom<T>(seed: string, fn: () => T): T {
-  const originalRandom = Math.random;
-  const hash = createHash('sha256').update(seed).digest();
-  Math.random = mulberry32(hash.readUInt32BE(0));
-  try {
-    return fn();
-  } finally {
-    Math.random = originalRandom;
-  }
+/**
+ * Reproducible simulation from a string seed.
+ *
+ * This used to swap out the global Math.random for the duration of the call.
+ * The engine now takes a seed directly, so the monkey-patch is gone — no global
+ * mutation, and no risk of a throw inside the callback leaving Math.random
+ * replaced.
+ */
+function seedNumber(seed: string): number {
+  return createHash('sha256').update(seed).digest().readInt32BE(0);
 }
 
 function simulateWithSeed(
@@ -43,7 +41,7 @@ function simulateWithSeed(
   numSims: number,
   seed: string
 ): SimulationResult[] {
-  return withSeededRandom(seed, () => simulateFull(teams, fixtures, numSims));
+  return simulateFull(teams, fixtures, numSims, seedNumber(seed));
 }
 
 function lockFixture(
@@ -232,30 +230,65 @@ export function buildGameOfWeekShortlist(params: {
   return candidates.sort((a, b) => b.overallScore - a.overallScore).slice(0, 3);
 }
 
+/**
+ * The ideal result in each of the round's fixtures for the target club, and how
+ * much each is worth.
+ *
+ * Previously each locked run and the baseline drew from a DIFFERENT seed
+ * (`${seedBase}:perfect:${fixtureId}:${result}` against `${seedBase}:baseline`).
+ * That is reproducible but not paired, so every delta carried the full unpaired
+ * sampling error — and because it was stable across reruns, it looked solid. One
+ * paired scan measures all three outcomes of every fixture against a shared
+ * baseline season and reports each delta's actual standard error.
+ */
 export function buildPerfectWeekend(params: {
   teams: Team[];
   fixtures: Fixture[];
   nextRoundFixtures: Fixture[];
-  baselineResults: SimulationResult[];
-  seedBase: string;
-}): WeeklyPreviewPerfectWeekendEntry[] {
-  const { teams, fixtures, nextRoundFixtures, baselineResults, seedBase } = params;
-  const baselineNewcastle =
-    baselineResults.find((result) => result.team === 'NEW')?.top7Pct ?? 0;
+  club: string;
+  numSims?: number;
+}): {
+  entries: WeeklyPreviewPerfectWeekendEntry[];
+  cumulativeDeltaPp: number;
+  cumulativeSePp: number;
+  isReportable: boolean;
+} {
+  const { teams, fixtures, nextRoundFixtures, club } = params;
+  const numSims = params.numSims ?? PERFECT_WEEKEND_SIMS;
 
-  return nextRoundFixtures.map((fixture) => {
-    const options = evaluatePerfectWeekendOptionsForFixture({
-      teams,
-      fixtures,
-      fixture,
-      baselineTop7Pct: baselineNewcastle,
-      seedBase,
-    });
+  const candidates: LeverageCandidate[] = nextRoundFixtures.flatMap((fixture) =>
+    (['home', 'draw', 'away'] as const).map((result) => ({
+      id: `${fixture.id}::${result}`,
+      locks: [{ fixtureId: fixture.id, result }],
+    }))
+  );
 
-    options.sort((a, b) => b.deltaPp - a.deltaPp);
-    const best = options[0];
+  if (candidates.length === 0) {
+    return { entries: [], cumulativeDeltaPp: 0, cumulativeSePp: 0, isReportable: false };
+  }
 
-    return {
+  const scan = pairedLeverageScan({
+    teams,
+    fixtures,
+    targetTeam: club,
+    metric: 'top7Pct',
+    candidates,
+    numSims,
+    seed: SENSITIVITY_SEED,
+  });
+  const byId = new Map(scan.results.map((r) => [r.candidateId, r]));
+
+  const entries: WeeklyPreviewPerfectWeekendEntry[] = [];
+  for (const fixture of nextRoundFixtures) {
+    const options = (['home', 'draw', 'away'] as const)
+      .map((result) => ({ result, scored: byId.get(`${fixture.id}::${result}`) }))
+      .filter((o): o is { result: 'home' | 'draw' | 'away'; scored: NonNullable<typeof o.scored> } =>
+        o.scored !== undefined
+      );
+    if (options.length === 0) continue;
+
+    const best = options.reduce((a, b) => (b.scored.deltaPp > a.scored.deltaPp ? b : a));
+    entries.push({
       fixtureId: fixture.id,
       homeTeam: fixture.homeTeam,
       awayTeam: fixture.awayTeam,
@@ -266,36 +299,30 @@ export function buildPerfectWeekend(params: {
           : best.result === 'away'
             ? `${fixture.awayTeam} win`
             : 'Draw',
-      deltaPp: best.deltaPp,
-      resultingTop7Pct: best.resultingTop7Pct,
-    };
-  });
-}
+      deltaPp: Number(best.scored.deltaPp.toFixed(2)),
+      resultingTop7Pct: Number(best.scored.lockedPct.toFixed(2)),
+      sePp: Number(best.scored.sePp.toFixed(3)),
+      noiseFloorPp: Number(best.scored.noiseFloorPp.toFixed(3)),
+      belowNoiseFloor: best.scored.belowNoiseFloor,
+    });
+  }
 
-export function evaluatePerfectWeekendOptionsForFixture(params: {
-  teams: Team[];
-  fixtures: Fixture[];
-  fixture: Fixture;
-  baselineTop7Pct: number;
-  seedBase: string;
-}) {
-  const { teams, fixtures, fixture, baselineTop7Pct, seedBase } = params;
+  const cumulativeDeltaPp = Number(
+    entries.reduce((sum, e) => sum + e.deltaPp, 0).toFixed(2)
+  );
+  // Independent locks across distinct fixtures, so errors add in quadrature.
+  const cumulativeSePp = Number(
+    Math.sqrt(entries.reduce((sum, e) => sum + e.sePp * e.sePp, 0)).toFixed(3)
+  );
 
-  return (['home', 'draw', 'away'] as const).map((result) => {
-    const simulated = simulateWithSeed(
-      teams,
-      lockFixture(fixtures, fixture.id, result),
-      3000,
-      `${seedBase}:perfect:${fixture.id}:${result}`
-    );
-    const newcastle = simulated.find((entry) => entry.team === 'NEW');
-    const top7 = newcastle?.top7Pct ?? baselineTop7Pct;
-    return {
-      result,
-      deltaPp: Number((top7 - baselineTop7Pct).toFixed(2)),
-      resultingTop7Pct: Number(top7.toFixed(2)),
-    };
-  });
+  return {
+    entries,
+    cumulativeDeltaPp,
+    cumulativeSePp,
+    // The table is fixture-level deltas. If not one of them is measurable,
+    // there is no table to render.
+    isReportable: entries.some((e) => !e.belowNoiseFloor),
+  };
 }
 
 function teamNameFor(abbr: string, teams: Team[]) {
@@ -340,16 +367,14 @@ export async function buildWeeklyPreviewDossier(
     baselineResults,
     seedBase,
   });
-  const perfectWeekend = buildPerfectWeekend({
+  const perfectWeekendScan = buildPerfectWeekend({
     teams: liveSnapshot.teams,
     fixtures: liveSnapshot.fixtures,
     nextRoundFixtures,
-    baselineResults,
-    seedBase,
+    club: 'NEW',
   });
-  const perfectWeekendCumulativeDeltaPp = Number(
-    perfectWeekend.reduce((sum, entry) => sum + entry.deltaPp, 0).toFixed(2)
-  );
+  const perfectWeekend = perfectWeekendScan.entries;
+  const perfectWeekendCumulativeDeltaPp = perfectWeekendScan.cumulativeDeltaPp;
 
   const leader = sortedTeams[0];
   const leaderResult = baselineResults.find((result) => result.team === leader.abbr) ?? baselineResults[0];
@@ -441,8 +466,11 @@ export async function buildWeeklyPreviewDossier(
             : [];
         })()
       : [],
-    // Perfect-weekend needs the baseline once (for table context) plus all deltas, resulting percentages, and cumulative
-    'perfect-weekend': [
+    // Perfect-weekend needs the baseline once (for table context) plus all deltas,
+    // resulting percentages, and cumulative — but only when any of it is
+    // measurable. When nothing clears its noise floor, no number is permitted in
+    // the section at all, which is what stops a table of noise being written.
+    'perfect-weekend': !perfectWeekendScan.isReportable ? [] : [
       buildAllowedClaim('perfect-baseline', 'Newcastle top-7 baseline', selectedClubBaseline.top7Pct, 'percent', 'selectedClubBaseline.top7Pct'),
       ...perfectWeekend.flatMap((entry, index) => [
         buildAllowedClaim(`perfect-delta-${index + 1}`, `${entry.homeTeam} vs ${entry.awayTeam} delta`, entry.deltaPp, 'pp', `perfectWeekend[${index}].deltaPp`),
@@ -465,7 +493,7 @@ export async function buildWeeklyPreviewDossier(
   return {
     version: WEEKLY_PREVIEW_VERSION,
     generatedAt: Date.now(),
-    season: '2025-26',
+    season: CURRENT_SEASON,
     club: 'NEW',
     targetMetric: 'top7Pct',
     dataHash,
@@ -492,6 +520,8 @@ export async function buildWeeklyPreviewDossier(
     roundsRemaining,
     perfectWeekend,
     perfectWeekendCumulativeDeltaPp,
+    perfectWeekendIsReportable: perfectWeekendScan.isReportable,
+    perfectWeekendCumulativeSePp: perfectWeekendScan.cumulativeSePp,
     approvedStorylines: research.approvedStorylines,
     warnings,
     sources: research.sources,

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { CURRENT_SEASON } from '@/lib/constants';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Team, Fixture } from '@/lib/types';
 import { WhatIfAnalysis, WHAT_IF_ANALYSIS_VERSION } from './types';
@@ -137,7 +138,7 @@ export async function upsertWhatIfCache(params: {
       {
         team_abbr: params.targetTeam,
         target_metric: params.targetMetric,
-        season: '2025-26',
+        season: CURRENT_SEASON,
         gameweek: params.gameweek,
         scenario_key: params.scenarioKey,
         analysis_json: params.analysis,

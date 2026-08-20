@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { CURRENT_SEASON, SEASON_START_YEAR } from '@/lib/constants';
 import { executeWebSearch } from '@/lib/web-search';
 import { lookupPlayer, getPlayersForClub } from '@/lib/what-if/fifa-data';
 import {
@@ -24,7 +25,7 @@ const TOOLS: OpenRouterTool[] = [
           query: {
             type: 'string',
             description:
-              "Search query. Keep specific and include current year/season for recency. Examples: 'Bruno Guimaraes Newcastle 2025-26 stats', 'Chelsea results without Cole Palmer 2026'",
+              `Search query. Keep specific and include current year/season for recency. Examples: 'Bruno Guimaraes Newcastle ${CURRENT_SEASON} stats', 'Chelsea results without Cole Palmer ${SEASON_START_YEAR}'`,
           },
           intent: {
             type: 'string',

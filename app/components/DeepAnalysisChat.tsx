@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { CURRENT_SEASON } from '@/lib/constants';
 import { ChatMessage } from '@/lib/chat-types';
 import { Team, SensitivityResult, DeepAnalysis } from '@/lib/types';
 import { consumeChatStream } from '@/lib/chat-stream';
@@ -35,7 +36,7 @@ function buildAnalysisContext(analysis: DeepAnalysis, teamName: string): string 
     .map((m) => `  - ${m.homeTeam} vs ${m.awayTeam}: ${m.whyItMatters} (Ideal: ${m.idealResult}, Impact: ${m.simulationImpact})`)
     .join('\n');
 
-  return `You are a Premier League football analyst assistant. The user has just read a deep analysis report about ${teamName}'s path to European qualification (2025-26 season). You have full knowledge of this analysis and can answer follow-up questions about it.
+  return `You are a Premier League football analyst assistant. The user has just read a deep analysis report about ${teamName}'s path to European qualification (${CURRENT_SEASON} season). You have full knowledge of this analysis and can answer follow-up questions about it.
 
 KEY FACTS FROM THE ANALYSIS:
 - ${teamName} are ${stateOfPlay.position}th on ${stateOfPlay.points} points with ${stateOfPlay.gamesRemaining} matches remaining

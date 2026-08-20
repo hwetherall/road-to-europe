@@ -7,12 +7,17 @@ import {
   CandidatePath,
   FixtureLock,
 } from './types';
-import { simulateFast, simulateFull } from './server-simulation';
+import { simulateFull } from './server-simulation';
+import { LeverageCandidate, pairedLeverageScan } from './leverage/paired-scan';
+import { DEFAULT_SENSITIVITY_SIMS, SENSITIVITY_SEED, sensitivityScanDetailed } from './sensitivity';
 import { compositePlausibility, filterByPlausibility, deduplicatePaths } from './plausibility';
 
 const MIN_COMPOSITE_PLAUSIBILITY = 0.005; // 0.5%
 const MIN_LOCK_IMPROVEMENT_PP = 0.25;
 const PLAUSIBILITY_WEIGHT = 0.35;
+
+/** Simulations per greedy step. Ranking work, so cheaper than the main scan. */
+const GREEDY_SIMS = 1000;
 
 // ── Helpers ──
 
@@ -87,14 +92,6 @@ function getMetricValue(result: SimulationResult | undefined, metric: keyof Simu
   return result[metric] as number;
 }
 
-function getImprovement(
-  currentOdds: number,
-  candidateOdds: number,
-  minimize: boolean
-): number {
-  return minimize ? currentOdds - candidateOdds : candidateOdds - currentOdds;
-}
-
 // ── Main Path Search ──
 
 export function pathSearch(config: PathSearchConfig): PathSearchResult {
@@ -122,50 +119,23 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
   );
 
   // ── Step 2: Sensitivity scan ──
-  const scheduledFixtures = fixtures.filter((f) => f.status === 'SCHEDULED');
-  const sensitivity: SensitivityResult[] = [];
+  // Delegated to the shared paired engine. This used to be a second,
+  // independent implementation that re-simulated all 380 fixtures once per
+  // lock: ~25 s at Matchday 0, on unpaired random draws, with no error bars.
+  const scan = sensitivityScanDetailed(
+    teams,
+    fixtures,
+    targetTeam,
+    DEFAULT_SENSITIVITY_SIMS,
+    targetMetric,
+    SENSITIVITY_SEED
+  );
+  totalSims += DEFAULT_SENSITIVITY_SIMS;
+  const sensitivity = scan.ranked;
 
-  for (const fixture of scheduledFixtures) {
-    const deltas: Record<string, number> = {};
-    const absVals: Record<string, number> = {};
-    for (const result of ['home', 'draw', 'away'] as const) {
-      const lock: FixtureLock = {
-        fixtureId: fixture.id,
-        homeTeam: fixture.homeTeam,
-        awayTeam: fixture.awayTeam,
-        result,
-        resultLabel: '',
-        individualPlausibility: 0,
-      };
-      const locked = applyLocks(fixtures, [lock]);
-      const simResult = simulateFast(teams, locked, 1000);
-      totalSims += 1000;
-      const odds = getMetricValue(
-        simResult.find((r) => r.team === targetTeam),
-        targetMetric
-      );
-      deltas[result] = odds - baselineOdds;
-      absVals[result] = odds;
-    }
-    sensitivity.push({
-      fixtureId: fixture.id,
-      homeTeam: fixture.homeTeam,
-      awayTeam: fixture.awayTeam,
-      deltaIfHomeWin: deltas.home,
-      deltaIfDraw: deltas.draw,
-      deltaIfAwayWin: deltas.away,
-      maxAbsDelta: Math.max(
-        Math.abs(deltas.home),
-        Math.abs(deltas.draw),
-        Math.abs(deltas.away)
-      ),
-      absIfHomeWin: absVals.home,
-      absIfAwayWin: absVals.away,
-      absIfDraw: absVals.draw,
-      absBaseline: baselineOdds,
-    });
-  }
-  sensitivity.sort((a, b) => b.maxAbsDelta - a.maxAbsDelta);
+  // Only fixtures that clear their own measured noise floor are candidates. In
+  // August that list can legitimately be short or empty, in which case the
+  // greedy search below finds no path rather than optimising against noise.
   const topFixtures = sensitivity.slice(0, 15);
 
   // ── Step 3: Greedy optimal path ──
@@ -177,20 +147,11 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
     const locks: FixtureLock[] = [...startingLocks];
     let currentPlausibility = compositePlausibility(locks);
 
-    const startingFixtures = applyLocks(fixtures, locks);
-    const startingResult = simulateFast(teams, startingFixtures, 1000);
-    totalSims += 1000;
-    let currentOdds = getMetricValue(
-      startingResult.find((r) => r.team === targetTeam),
-      targetMetric
-    );
-
+    // One paired scan per step evaluates every candidate next-lock against the
+    // same baseline season, replacing a separate 1000-sim run per candidate.
     for (let step = locks.length; step < maxLocks; step++) {
-      let bestLock: FixtureLock | null = null;
-      let bestOdds = currentOdds;
-      let bestImprovement = 0;
-      let bestUtility = -Infinity;
-      let bestPlausibility = currentPlausibility;
+      const candidates: LeverageCandidate[] = [];
+      const byId = new Map<string, FixtureLock>();
 
       for (const sf of topFixtures) {
         if (locks.some((l) => l.fixtureId === sf.fixtureId)) continue;
@@ -199,29 +160,54 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
         for (const result of ['home', 'draw', 'away'] as const) {
           const candidateLock = makeFixtureLock(sf, result, fixtures);
           const testLocks = [...locks, candidateLock];
-          const candidatePlausibility = compositePlausibility(testLocks);
-          if (candidatePlausibility < MIN_COMPOSITE_PLAUSIBILITY) continue;
+          if (compositePlausibility(testLocks) < MIN_COMPOSITE_PLAUSIBILITY) continue;
+          const id = `${sf.fixtureId}::${result}`;
+          byId.set(id, candidateLock);
+          candidates.push({
+            id,
+            locks: testLocks.map((l) => ({ fixtureId: l.fixtureId, result: l.result })),
+          });
+        }
+      }
 
-          const testFixtures = applyLocks(fixtures, testLocks);
-          const simResult = simulateFast(teams, testFixtures, 1000);
-          totalSims += 1000;
-          const odds = getMetricValue(
-            simResult.find((r) => r.team === targetTeam),
-            targetMetric
-          );
-          const improvement = getImprovement(currentOdds, odds, minimize);
-          if (improvement <= 0) continue;
+      if (candidates.length === 0) break;
 
-          const utility =
-            improvement * Math.pow(candidatePlausibility, PLAUSIBILITY_WEIGHT);
+      const stepScan = pairedLeverageScan({
+        teams,
+        fixtures,
+        targetTeam,
+        metric: targetMetric,
+        candidates,
+        numSims: GREEDY_SIMS,
+        seed: SENSITIVITY_SEED,
+        baselineLocks: locks.map((l) => ({ fixtureId: l.fixtureId, result: l.result })),
+      });
+      totalSims += GREEDY_SIMS;
 
-          if (utility > bestUtility) {
-            bestLock = candidateLock;
-            bestOdds = odds;
-            bestImprovement = improvement;
-            bestUtility = utility;
-            bestPlausibility = candidatePlausibility;
-          }
+      let bestLock: FixtureLock | null = null;
+      let bestImprovement = 0;
+      let bestUtility = -Infinity;
+      let bestPlausibility = currentPlausibility;
+
+      for (const result of stepScan.results) {
+        const candidateLock = byId.get(result.candidateId);
+        if (!candidateLock) continue;
+
+        // deltaPp is measured against this scan's own baseline, which already
+        // has the committed locks applied. For relegation, lower is better.
+        const improvement = minimize ? -result.deltaPp : result.deltaPp;
+        if (improvement <= 0) continue;
+        // Never chase a gain smaller than its own error bar.
+        if (improvement <= result.noiseFloorPp) continue;
+
+        const candidatePlausibility = compositePlausibility([...locks, candidateLock]);
+        const utility = improvement * Math.pow(candidatePlausibility, PLAUSIBILITY_WEIGHT);
+
+        if (utility > bestUtility) {
+          bestLock = candidateLock;
+          bestImprovement = improvement;
+          bestUtility = utility;
+          bestPlausibility = candidatePlausibility;
         }
       }
 
@@ -229,9 +215,7 @@ export function pathSearch(config: PathSearchConfig): PathSearchResult {
       if (bestImprovement < MIN_LOCK_IMPROVEMENT_PP) break;
 
       locks.push(bestLock);
-      currentOdds = bestOdds;
       currentPlausibility = bestPlausibility;
-
     }
 
     // Final validation with full 10K sims

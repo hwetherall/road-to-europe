@@ -1,28 +1,28 @@
 import { Team, Fixture, SimulationResult } from './types';
+import { GOAL_PARAMS } from './sim/goals';
+import {
+  hashRand,
+  outcomeSubstream,
+  samplePoisson,
+  scorelineSubstream,
+  simKey,
+} from './sim/rng';
 
-// Poisson-distributed goal sampling
-function sampleGoals(lambda: number): number {
-  const L = Math.exp(-lambda);
-  let k = 0;
-  let p = 1;
-  do {
-    k++;
-    p *= Math.random();
-  } while (p > L);
-  return k - 1;
-}
-
-// Goal expectations by result type (calibrated to EPL averages)
-const GOAL_PARAMS = {
-  homeWin: { home: 1.7, away: 0.6 },
-  draw: { home: 1.1, away: 1.1 },
-  awayWin: { home: 0.7, away: 1.5 },
-};
-
+/**
+ * Monte Carlo season simulation.
+ *
+ * Pass `seed` for a reproducible run: the same standings, fixtures and seed
+ * always produce the same probabilities, so a number does not drift when the
+ * reader presses Re-run. Omit it and the run uses Math.random as before.
+ *
+ * Randomness is drawn per (simulation, fixture) substream rather than from one
+ * sequential stream — see lib/sim/rng.ts for why that matters.
+ */
 export function simulate(
   teams: Team[],
   fixtures: Fixture[],
-  numSims: number
+  numSims: number,
+  seed?: number
 ): SimulationResult[] {
   const teamIndex: Record<string, number> = {};
   teams.forEach((t, i) => {
@@ -36,14 +36,18 @@ export function simulate(
 
   // Only process scheduled fixtures
   const scheduledFixtures = fixtures.filter((f) => f.status === 'SCHEDULED');
+  const seeded = seed !== undefined;
 
   for (let sim = 0; sim < numSims; sim++) {
+    const simIndex = seeded ? simKey(seed as number, sim) : 0;
+
     // Clone current state
     const points = teams.map((t) => t.points);
     const gd = teams.map((t) => t.goalDifference);
     const gf = teams.map((t) => t.goalsFor);
 
-    for (const fixture of scheduledFixtures) {
+    for (let j = 0; j < scheduledFixtures.length; j++) {
+      const fixture = scheduledFixtures[j];
       const hi = teamIndex[fixture.homeTeam];
       const ai = teamIndex[fixture.awayTeam];
       if (hi === undefined || ai === undefined) continue;
@@ -51,29 +55,36 @@ export function simulate(
       const hProb = fixture.homeWinProb ?? 0.4;
       const dProb = fixture.drawProb ?? 0.25;
 
-      const rand = Math.random();
+      const rand = seeded ? hashRand(simIndex, outcomeSubstream(j), 0) : Math.random();
+      const outcome = rand < hProb ? 0 : rand < hProb + dProb ? 1 : 2;
+
+      let draw = 0;
+      const next = seeded
+        ? () => hashRand(simIndex, scorelineSubstream(j, outcome), draw++)
+        : Math.random;
+
       let homeGoals: number;
       let awayGoals: number;
 
-      if (rand < hProb) {
+      if (outcome === 0) {
         // Home win
-        homeGoals = sampleGoals(GOAL_PARAMS.homeWin.home);
-        awayGoals = sampleGoals(GOAL_PARAMS.homeWin.away);
+        homeGoals = samplePoisson(GOAL_PARAMS.homeWin.home, next);
+        awayGoals = samplePoisson(GOAL_PARAMS.homeWin.away, next);
         // Ensure home actually wins
         if (homeGoals <= awayGoals) {
           homeGoals = awayGoals + 1;
         }
         points[hi] += 3;
-      } else if (rand < hProb + dProb) {
+      } else if (outcome === 1) {
         // Draw
-        homeGoals = sampleGoals(GOAL_PARAMS.draw.home);
+        homeGoals = samplePoisson(GOAL_PARAMS.draw.home, next);
         awayGoals = homeGoals; // Force equal for draw
         points[hi] += 1;
         points[ai] += 1;
       } else {
         // Away win
-        homeGoals = sampleGoals(GOAL_PARAMS.awayWin.home);
-        awayGoals = sampleGoals(GOAL_PARAMS.awayWin.away);
+        homeGoals = samplePoisson(GOAL_PARAMS.awayWin.home, next);
+        awayGoals = samplePoisson(GOAL_PARAMS.awayWin.away, next);
         // Ensure away actually wins
         if (awayGoals <= homeGoals) {
           awayGoals = homeGoals + 1;

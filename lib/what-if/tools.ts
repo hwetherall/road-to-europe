@@ -1,4 +1,5 @@
 import { OpenRouterTool } from '@/lib/openrouter';
+import { CURRENT_SEASON } from '../constants';
 import { Team, Fixture, SimulationResult } from '@/lib/types';
 import { simulateFullSeason, TeamModification } from './full-season-sim';
 import { executeWebSearchDetailed } from '@/lib/web-search';
@@ -80,7 +81,7 @@ export const WHAT_IF_TOOLS: OpenRouterTool[] = [
     function: {
       name: 'web_search',
       description:
-        'Search the web for current football information. Use for: verifying transfers and fees, checking player availability, finding tactical analysis, checking fixture congestion. ALWAYS include "2025-26" in queries about teams. ALWAYS verify football facts via search.',
+        `Search the web for current football information. Use for: verifying transfers and fees, checking player availability, finding tactical analysis, checking fixture congestion. ALWAYS include the current season (${CURRENT_SEASON}) in queries about teams. ALWAYS verify football facts via search.`,
       parameters: {
         type: 'object',
         properties: {
@@ -330,7 +331,7 @@ export function createToolExecutors(
     async web_search(args) {
       let query = args.query as string;
 
-      // Fix 2: Auto-append "2025-26" to queries that mention PL teams but no season
+      // Auto-append the current season to queries that mention a PL team but no season
       const teamNames = teams.map(t => t.name.toLowerCase());
       const teamAbbrs = teams.map(t => t.abbr.toLowerCase());
       const mentionsTeam = teamNames.some(n => query.toLowerCase().includes(n)) ||
@@ -338,7 +339,7 @@ export function createToolExecutors(
       const hasSeason = /20\d\d[-\/]\d\d/.test(query) || /20\d\d/.test(query);
 
       if (mentionsTeam && !hasSeason) {
-        query = `${query} 2025-26`;
+        query = `${query} ${CURRENT_SEASON}`;
       }
 
       try {

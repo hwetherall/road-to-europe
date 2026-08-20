@@ -39,7 +39,10 @@ function serializedContext(previousSections: WeeklyPreviewSectionArtifact[]) {
   );
 }
 
-function sectionSpecificInstructions(sectionId: WeeklyPreviewSectionId): string {
+function sectionSpecificInstructions(
+  sectionId: WeeklyPreviewSectionId,
+  dossier: WeeklyPreviewDossier
+): string {
   switch (sectionId) {
     case 'overview':
       return [
@@ -85,8 +88,21 @@ function sectionSpecificInstructions(sectionId: WeeklyPreviewSectionId): string 
         'Verify squad data: only discuss players who actually play for that club.',
       ].join('\n');
     case 'perfect-weekend':
+      // The table is a ranking of fixture-level swings. Early in a season those
+      // swings are smaller than the simulation's own standard error, so there
+      // is nothing to tabulate — say that instead of dressing noise as a table.
+      if (!dossier.perfectWeekendIsReportable) {
+        return [
+          'DO NOT write a table this week. No fixture in this round changes Newcastle\'s top-7 probability by more than the simulation\'s own margin of error, so a table of swings would be reporting noise.',
+          `Explain that plainly in 3-4 sentences: with ${dossier.roundsRemaining} rounds still to play, no single result is individually decisive, and the model will not rank what it cannot measure.`,
+          'Name the fixtures in the round as prose, and say which results Newcastle would want, WITHOUT attaching any probability swing to them.',
+          'Do NOT state any pp figure, cumulative total, or resulting probability. There are no allowed numeric claims for this section this week.',
+          'Set meta.fixtureCount to the number of fixtures in the round.',
+        ].join('\n');
+      }
       return [
         'List every fixture in the next round with the optimal Newcastle result and the top-7 swing. Use a markdown table.',
+        'Only fixtures whose swing clears its own margin of error carry a number. For any entry flagged belowNoiseFloor, write "below noise floor" in the swing column instead of a figure.',
         'IMPORTANT: Include the cumulative total -- the perfectWeekendCumulativeDeltaPp claim gives the exact number if every result falls Newcastle way. State the resulting probability explicitly (baseline + cumulative delta).',
         'Set meta.fixtureCount.',
       ].join('\n');
@@ -135,6 +151,8 @@ ${JSON.stringify(
     selectedClubFixture: dossier.selectedClubFixture,
     perfectWeekend: dossier.perfectWeekend,
     perfectWeekendCumulativeDeltaPp: dossier.perfectWeekendCumulativeDeltaPp,
+    perfectWeekendCumulativeSePp: dossier.perfectWeekendCumulativeSePp,
+    perfectWeekendIsReportable: dossier.perfectWeekendIsReportable,
     approvedStorylines: dossier.approvedStorylines,
     warnings: dossier.warnings,
     sources: dossier.sources,
@@ -163,7 +181,7 @@ Return JSON in this shape:
 }
 
 Additional section instructions:
-${sectionSpecificInstructions(sectionId)}
+${sectionSpecificInstructions(sectionId, dossier)}
 ${retryNote ? `\n\nRetry correction:\n${retryNote}` : ''}
 `;
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { CURRENT_SEASON, SEASON_START_YEAR } from '@/lib/constants';
 import { pathSearch } from '@/lib/path-search';
 import {
   createDeepAnalysisScenarioKey,
@@ -129,7 +130,7 @@ function buildDeepResearchPrompt(
     day: 'numeric', month: 'long', year: 'numeric'
   });
 
-  return `You are a football research assistant building a VERIFIED FACT SHEET for a Deep Analysis document. The current date is ${currentDate}. The Premier League season is 2025-26.
+  return `You are a football research assistant building a VERIFIED FACT SHEET for a Deep Analysis document. The current date is ${currentDate}. The Premier League season is ${CURRENT_SEASON}.
 
 ## YOUR TASK
 Research the following teams IN DEPTH and produce a structured fact sheet. You MUST search for every single claim. Do NOT use training knowledge — it is outdated and unreliable.
@@ -140,22 +141,22 @@ Teams to research: ${teamsToResearch.join(', ')}
 For EACH team listed, perform ALL of these searches. Do not skip any.
 
 ### Core verification (3 searches per team)
-1. "[team] manager head coach 2025-26" — WHO is the current manager? This is the #1 source of errors. Managers get sacked constantly.
-2. "[team] squad key players 2025-26 season" — WHO plays for this team NOW? Verify every name. Players transfer and get loaned.
+1. "[team] manager head coach ${CURRENT_SEASON}" — WHO is the current manager? This is the #1 source of errors. Managers get sacked constantly.
+2. "[team] squad key players ${CURRENT_SEASON} season" — WHO plays for this team NOW? Verify every name. Players transfer and get loaned.
 3. "[team] injuries suspensions ${currentDate.split(' ').slice(1).join(' ')}" — who is currently OUT? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
 
 ### Form and results (2 searches per team)
-4. "[team] recent results form 2026" — last 5-6 results with scores
-5. "[team] home away record 2025-26 Premier League" — split home/away points and record
+4. "[team] recent results form ${SEASON_START_YEAR}" — last 5-6 results with scores
+5. "[team] home away record ${CURRENT_SEASON} Premier League" — split home/away points and record
 
 ### Tactical depth (3-4 searches per team — THIS IS CRITICAL)
-6. "[team] tactical analysis formation pressing style 2025-26" — how do they play under the current manager? What formation? How do they press? What's their build-up pattern?
-7. "[team] set piece record corners goals conceded 2025-26" — set piece attacking AND defending record. Goals from corners, free kicks. Defensive set piece system (zonal, man-marking, hybrid).
-8. "[team] defensive vulnerabilities weaknesses 2025-26" — specific weaknesses identified by analysts or pundits. Transition defence, high-line risks, wide areas, aerial duels.
+6. "[team] tactical analysis formation pressing style ${CURRENT_SEASON}" — how do they play under the current manager? What formation? How do they press? What's their build-up pattern?
+7. "[team] set piece record corners goals conceded ${CURRENT_SEASON}" — set piece attacking AND defending record. Goals from corners, free kicks. Defensive set piece system (zonal, man-marking, hybrid).
+8. "[team] defensive vulnerabilities weaknesses ${CURRENT_SEASON}" — specific weaknesses identified by analysts or pundits. Transition defence, high-line risks, wide areas, aerial duels.
 9. "[team] [opponent from decisive match] tactical preview" — if a preview article exists for the upcoming head-to-head, it will contain matchup-specific insights.
 
 ### Context (1-2 searches per team)
-10. "[team] European campaign cup fixtures schedule 2026" — are they in Europe? How does fixture congestion affect them?
+10. "[team] European campaign cup fixtures schedule ${CURRENT_SEASON}" — are they in Europe? How does fixture congestion affect them?
 
 You have a budget of up to 35 web searches. Use them. Prioritise tactical depth searches (items 6-9) — these are what make the analysis valuable. If you have to skip anything, skip item 10, never skip 6-8.
 
@@ -206,9 +207,9 @@ Teams: ${teamsToResearch.join(', ')}
 
 ## REQUIRED SEARCHES — LIGHT TIER
 For each team, do 2-3 searches:
-1. "[team] manager form results March 2026" — current manager + recent form
-2. "[team] injuries key absences 2026" — who's missing? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
-3. "[team] home away record 2025-26" — only if the team's home/away split is relevant
+1. "[team] manager form results ${currentDate.split(' ').slice(1).join(' ')}" — current manager + recent form
+2. "[team] injuries key absences ${CURRENT_SEASON}" — who's missing? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
+3. "[team] home away record ${CURRENT_SEASON}" — only if the team's home/away split is relevant
 
 You have a budget of up to 15 searches. Be efficient.
 
@@ -248,7 +249,7 @@ function buildRivalResearchPrompt(
       ? 'relegation battle'
       : 'European qualification race';
 
-  return `You are a football research assistant investigating the RIVALS of ${teamName} in the ${objectiveContext}. The current date is ${currentDate}. The Premier League season is 2025-26.
+  return `You are a football research assistant investigating the RIVALS of ${teamName} in the ${objectiveContext}. The current date is ${currentDate}. The Premier League season is ${CURRENT_SEASON}.
 
 ## YOUR TASK
 Research each rival's RECENT TRAJECTORY to provide comparative context for ${teamName}'s analysis. The goal is to answer: "While ${teamName} has been doing X, their rivals have been doing Y." This is about momentum and direction, not tactical detail.
@@ -260,14 +261,14 @@ ${rivalList}
 For EACH rival, perform these searches:
 
 ### 1. Recent form and results (2 searches per rival — MOST IMPORTANT)
-1. "[rival] results April 2026" or "[rival] last 5 results 2026" — Get the ACTUAL SCORES of their last 4-6 matches. Include cup matches — they tell the form story. This is the single most important search.
-2. "[rival] form run momentum 2025-26" — Are they surging, wobbling, or collapsing? Look for streak data, points-per-game over last 10 matches, any narrative about their trajectory.
+1. "[rival] results ${currentDate.split(' ').slice(1).join(' ')}" or "[rival] last 5 results ${CURRENT_SEASON}" — Get the ACTUAL SCORES of their last 4-6 matches. Include cup matches — they tell the form story. This is the single most important search.
+2. "[rival] form run momentum ${CURRENT_SEASON}" — Are they surging, wobbling, or collapsing? Look for streak data, points-per-game over last 10 matches, any narrative about their trajectory.
 
 ### 2. Remaining fixtures (1 search per rival)
-3. "[rival] remaining fixtures schedule 2025-26" — What's left? Is the run-in easy or brutal? Are there direct clashes with other rivals?
+3. "[rival] remaining fixtures schedule ${CURRENT_SEASON}" — What's left? Is the run-in easy or brutal? Are there direct clashes with other rivals?
 
 ### 3. Key context (1 search per rival — if budget allows)
-4. "[rival] injuries absences April 2026" — Any major absences that change their trajectory? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
+4. "[rival] injuries absences ${CURRENT_SEASON}" — Any major absences that change their trajectory? **SKIP this search if PRE-LOADED INJURY DATA is provided below — use that data directly instead.**
 
 You have a budget of up to 12 searches. Prioritise searches 1-2 (form and results) above everything else — the recent results with actual scores are what the writing agent needs most.
 
@@ -1093,7 +1094,7 @@ export async function POST(req: NextRequest) {
       teams,
       fixtures,
       targetTeam,
-      targetMetric: targetMetric as keyof import('@/lib/types').SimulationResult,
+      targetMetric: targetMetric as import('@/lib/types').SensitivityMetric,
       maxFixturesToLock: 8,
       branchDepth: 3,
     };

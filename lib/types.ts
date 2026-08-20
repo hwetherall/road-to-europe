@@ -54,6 +54,29 @@ export interface SensitivityResult {
   absIfAwayWin: number;
   absIfDraw: number;
   absBaseline: number;
+  /**
+   * Measured standard error of the outcome that produced maxAbsDelta, in
+   * percentage points. Computed from the per-simulation paired difference, not
+   * from an assumed variance-reduction factor.
+   */
+  sePp: number;
+  /** Two-sided ~95% reporting threshold for this fixture: 2 x sePp. */
+  noiseFloorPp: number;
+  /** True when maxAbsDelta is not distinguishable from zero at ~95%. */
+  belowNoiseFloor: boolean;
+}
+
+/** A sensitivity scan plus the context needed to report honestly on it. */
+export interface SensitivityScanSummary {
+  /** Fixtures whose swing clears their own noise floor, strongest first. */
+  ranked: SensitivityResult[];
+  /** Fixtures measured but suppressed because their swing was indistinguishable from noise. */
+  belowFloorCount: number;
+  /** The target metric's baseline value, in percent. */
+  baselinePct: number;
+  /** Median noise floor across all fixtures measured, for UI copy. */
+  medianNoiseFloorPp: number;
+  numSims: number;
 }
 
 export type SensitivityMetric =
@@ -93,7 +116,12 @@ export interface PathSearchConfig {
   teams: Team[];
   fixtures: Fixture[];
   targetTeam: string;
-  targetMetric: keyof SimulationResult;
+  /**
+   * Narrowed from `keyof SimulationResult`: only the position-threshold metrics
+   * were ever passed, and only those can be measured by the paired leverage
+   * engine, which works from the target's final rank.
+   */
+  targetMetric: SensitivityMetric;
   maxFixturesToLock: number;
   branchDepth: number;
 }

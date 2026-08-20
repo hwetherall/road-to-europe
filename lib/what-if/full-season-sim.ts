@@ -1,23 +1,13 @@
 import { Team, Fixture, SimulationResult } from '../types';
 import { teamElo, eloProb } from '../elo';
-
-// Poisson-distributed goal sampling (same as existing engine)
-function sampleGoals(lambda: number): number {
-  const L = Math.exp(-lambda);
-  let k = 0;
-  let p = 1;
-  do {
-    k++;
-    p *= Math.random();
-  } while (p > L);
-  return k - 1;
-}
-
-const GOAL_PARAMS = {
-  homeWin: { home: 1.7, away: 0.6 },
-  draw: { home: 1.1, away: 1.1 },
-  awayWin: { home: 0.7, away: 1.5 },
-};
+import { GOAL_PARAMS } from '../sim/goals';
+import {
+  hashRand,
+  outcomeSubstream,
+  samplePoisson,
+  scorelineSubstream,
+  simKey,
+} from '../sim/rng';
 
 export interface TeamModification {
   teamAbbr: string;
@@ -31,6 +21,8 @@ export interface FullSeasonSimConfig {
   fixtures: Fixture[];         // ALL 380 fixtures (completed + scheduled)
   modifications: TeamModification[];
   numSims: number;             // Default 10000
+  /** Optional: makes the run reproducible. See lib/sim/rng.ts. */
+  seed?: number;
 }
 
 /**
@@ -57,7 +49,8 @@ export interface FullSeasonSimConfig {
  * we're asking: "What if this team had been X% stronger all season?"
  */
 export function simulateFullSeason(config: FullSeasonSimConfig): SimulationResult[] {
-  const { teams, fixtures, modifications, numSims } = config;
+  const { teams, fixtures, modifications, numSims, seed } = config;
+  const seeded = seed !== undefined;
 
   const teamIndex: Record<string, number> = {};
   teams.forEach((t, i) => { teamIndex[t.abbr] = i; });
@@ -135,29 +128,40 @@ export function simulateFullSeason(config: FullSeasonSimConfig): SimulationResul
   const totalPositions = new Array(n).fill(0);
 
   for (let sim = 0; sim < numSims; sim++) {
+    const simIndex = seeded ? simKey(seed as number, sim) : 0;
+
     // Start from ZERO — no banked points
     const points = new Array(n).fill(0);
     const gd = new Array(n).fill(0);
     const gf = new Array(n).fill(0);
 
-    for (const pf of precomputed) {
-      const rand = Math.random();
+    for (let j = 0; j < precomputed.length; j++) {
+      const pf = precomputed[j];
+      const rand = seeded ? hashRand(simIndex, outcomeSubstream(j), 0) : Math.random();
+      const outcome =
+        rand < pf.homeWinProb ? 0 : rand < pf.homeWinProb + pf.drawProb ? 1 : 2;
+
+      let draw = 0;
+      const next = seeded
+        ? () => hashRand(simIndex, scorelineSubstream(j, outcome), draw++)
+        : Math.random;
+
       let homeGoals: number;
       let awayGoals: number;
 
-      if (rand < pf.homeWinProb) {
-        homeGoals = sampleGoals(GOAL_PARAMS.homeWin.home);
-        awayGoals = sampleGoals(GOAL_PARAMS.homeWin.away);
+      if (outcome === 0) {
+        homeGoals = samplePoisson(GOAL_PARAMS.homeWin.home, next);
+        awayGoals = samplePoisson(GOAL_PARAMS.homeWin.away, next);
         if (homeGoals <= awayGoals) homeGoals = awayGoals + 1;
         points[pf.homeIdx] += 3;
-      } else if (rand < pf.homeWinProb + pf.drawProb) {
-        homeGoals = sampleGoals(GOAL_PARAMS.draw.home);
+      } else if (outcome === 1) {
+        homeGoals = samplePoisson(GOAL_PARAMS.draw.home, next);
         awayGoals = homeGoals;
         points[pf.homeIdx] += 1;
         points[pf.awayIdx] += 1;
       } else {
-        homeGoals = sampleGoals(GOAL_PARAMS.awayWin.home);
-        awayGoals = sampleGoals(GOAL_PARAMS.awayWin.away);
+        homeGoals = samplePoisson(GOAL_PARAMS.awayWin.home, next);
+        awayGoals = samplePoisson(GOAL_PARAMS.awayWin.away, next);
         if (awayGoals <= homeGoals) awayGoals = homeGoals + 1;
         points[pf.awayIdx] += 3;
       }

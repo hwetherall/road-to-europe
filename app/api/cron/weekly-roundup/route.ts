@@ -5,11 +5,23 @@ import { generateWeeklyRoundupDraft } from '@/lib/weekly-roundup/orchestrator';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+/**
+ * Roundup generation is research + several sequential LLM waves and routinely
+ * takes 1–2 minutes. Hobby fluid compute's ceiling is 300s; stating it here so
+ * a platform default change cannot silently clip the job.
+ */
+export const maxDuration = 300;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+function isAuthorized(request: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+
+  const authHeader = request.headers.get('authorization');
+  return authHeader === `Bearer ${secret}`;
+}
+
+export async function GET(request: NextRequest) {
+  if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

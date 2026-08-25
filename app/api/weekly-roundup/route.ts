@@ -6,6 +6,9 @@ import { generateWeeklyRoundupDraft } from '@/lib/weekly-roundup/orchestrator';
 
 export const dynamic = 'force-dynamic';
 
+/** Manual generate from /weekly-roundup takes 1–2 minutes. */
+export const maxDuration = 300;
+
 export async function GET() {
   const cacheEnabled = isWeeklyRoundupConfigured();
   const [draft, generationStatus] = await Promise.all([

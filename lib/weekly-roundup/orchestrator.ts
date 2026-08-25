@@ -36,9 +36,9 @@ import {
   WeeklyRoundupSectionId,
 } from '@/lib/weekly-roundup/types';
 
-const SECTION_MODEL = 'anthropic/claude-sonnet-4-6';
-const EDITOR_MODEL = 'anthropic/claude-opus-4-6';
-const REVIEWER_MODEL = process.env.ROUNDUP_REVIEWER_MODEL ?? 'openai/gpt-5.5';
+const SECTION_MODEL = 'anthropic/claude-sonnet-5';
+const EDITOR_MODEL = 'anthropic/claude-opus-5';
+const REVIEWER_MODEL = process.env.ROUNDUP_REVIEWER_MODEL ?? 'openai/gpt-5.6-sol-pro';
 
 // ── Structured Output Schemas ──
 

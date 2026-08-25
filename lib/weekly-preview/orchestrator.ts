@@ -14,8 +14,8 @@ import {
   WeeklyPreviewSectionId,
 } from '@/lib/weekly-preview/types';
 
-const SECTION_MODEL = 'anthropic/claude-sonnet-4-6';
-const EDITOR_MODEL = 'anthropic/claude-opus-4-6';
+const SECTION_MODEL = 'anthropic/claude-sonnet-5';
+const EDITOR_MODEL = 'anthropic/claude-opus-5';
 
 function parseSection(content: string): WeeklyPreviewSectionArtifact {
   const cleaned = content.trim();

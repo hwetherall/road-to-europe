@@ -58,6 +58,11 @@ next-env.d.ts
 # FIFA/FC dataset (large CSV, download from Kaggle)
 /data/*.csv
 
+# Full odds dump — tens of MB of raw bookmaker payloads. Compact capture index
+# and engine JSON in the same folder are the durable archive.
+/data/archives/2026-27-odds-snapshots.json
+/data/archives/verify-md1-report.json
+
 # python bytecode (injury scraper, modal scheduler)
 __pycache__/
 *.pyc

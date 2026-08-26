@@ -1,0 +1,452 @@
+{
+  "frozenAt": "2026-08-25T20:00:34.638Z",
+  "seed": 20260821,
+  "numSims": 100000,
+  "elapsedMs": 4997,
+  "maxAbsTop7Pp": 0.248,
+  "replayMatchesLedger": false,
+  "practicallyClose": true,
+  "newcastle": {
+    "team": "NEW",
+    "published": {
+      "champion_pct": 0.716,
+      "top7_pct": 21.635,
+      "relegation_pct": 13.207,
+      "avg_points": 49.92
+    },
+    "replay": {
+      "champion_pct": 0.72,
+      "top7_pct": 21.462,
+      "relegation_pct": 13.145,
+      "avg_points": 49.913
+    },
+    "delta": {
+      "champion_pp": 0.004,
+      "top7_pp": -0.173,
+      "relegation_pp": -0.062,
+      "avg_points": -0.007
+    }
+  },
+  "comparison": [
+    {
+      "team": "TOT",
+      "published": {
+        "champion_pct": 2.511,
+        "top7_pct": 40.425,
+        "relegation_pct": 5.2,
+        "avg_points": 54.191
+      },
+      "replay": {
+        "champion_pct": 2.545,
+        "top7_pct": 40.177,
+        "relegation_pct": 5.169,
+        "avg_points": 54.182
+      },
+      "delta": {
+        "champion_pp": 0.034,
+        "top7_pp": -0.248,
+        "relegation_pp": -0.031,
+        "avg_points": -0.009
+      }
+    },
+    {
+      "team": "EVE",
+      "published": {
+        "champion_pct": 0.881,
+        "top7_pct": 23.083,
+        "relegation_pct": 12.355,
+        "avg_points": 50.276
+      },
+      "replay": {
+        "champion_pct": 0.855,
+        "top7_pct": 23.313,
+        "relegation_pct": 12.428,
+        "avg_points": 50.286
+      },
+      "delta": {
+        "champion_pp": -0.026,
+        "top7_pp": 0.23,
+        "relegation_pp": 0.073,
+        "avg_points": 0.01
+      }
+    },
+    {
+      "team": "NEW",
+      "published": {
+        "champion_pct": 0.716,
+        "top7_pct": 21.635,
+        "relegation_pct": 13.207,
+        "avg_points": 49.92
+      },
+      "replay": {
+        "champion_pct": 0.72,
+        "top7_pct": 21.462,
+        "relegation_pct": 13.145,
+        "avg_points": 49.913
+      },
+      "delta": {
+        "champion_pp": 0.004,
+        "top7_pp": -0.173,
+        "relegation_pp": -0.062,
+        "avg_points": -0.007
+      }
+    },
+    {
+      "team": "BRE",
+      "published": {
+        "champion_pct": 1.363,
+        "top7_pct": 30.233,
+        "relegation_pct": 8.468,
+        "avg_points": 52.043
+      },
+      "replay": {
+        "champion_pct": 1.361,
+        "top7_pct": 30.393,
+        "relegation_pct": 8.447,
+        "avg_points": 52.044
+      },
+      "delta": {
+        "champion_pp": -0.002,
+        "top7_pp": 0.16,
+        "relegation_pp": -0.021,
+        "avg_points": 0.001
+      }
+    },
+    {
+      "team": "LEE",
+      "published": {
+        "champion_pct": 0.626,
+        "top7_pct": 19.754,
+        "relegation_pct": 14.563,
+        "avg_points": 49.437
+      },
+      "replay": {
+        "champion_pct": 0.62,
+        "top7_pct": 19.906,
+        "relegation_pct": 14.657,
+        "avg_points": 49.443
+      },
+      "delta": {
+        "champion_pp": -0.006,
+        "top7_pp": 0.152,
+        "relegation_pp": 0.094,
+        "avg_points": 0.006
+      }
+    },
+    {
+      "team": "COV",
+      "published": {
+        "champion_pct": 0.038,
+        "top7_pct": 3.308,
+        "relegation_pct": 47.951,
+        "avg_points": 41.702
+      },
+      "replay": {
+        "champion_pct": 0.037,
+        "top7_pct": 3.411,
+        "relegation_pct": 47.987,
+        "avg_points": 41.704
+      },
+      "delta": {
+        "champion_pp": -0.001,
+        "top7_pp": 0.103,
+        "relegation_pp": 0.036,
+        "avg_points": 0.002
+      }
+    },
+    {
+      "team": "BRI",
+      "published": {
+        "champion_pct": 1.442,
+        "top7_pct": 31.284,
+        "relegation_pct": 8.117,
+        "avg_points": 52.267
+      },
+      "replay": {
+        "champion_pct": 1.424,
+        "top7_pct": 31.188,
+        "relegation_pct": 8.006,
+        "avg_points": 52.269
+      },
+      "delta": {
+        "champion_pp": -0.018,
+        "top7_pp": -0.096,
+        "relegation_pp": -0.111,
+        "avg_points": 0.002
+      }
+    },
+    {
+      "team": "BOU",
+      "published": {
+        "champion_pct": 2.348,
+        "top7_pct": 39.548,
+        "relegation_pct": 5.336,
+        "avg_points": 54.011
+      },
+      "replay": {
+        "champion_pct": 2.376,
+        "top7_pct": 39.49,
+        "relegation_pct": 5.318,
+        "avg_points": 54.01
+      },
+      "delta": {
+        "champion_pp": 0.028,
+        "top7_pp": -0.058,
+        "relegation_pp": -0.018,
+        "avg_points": -0.001
+      }
+    },
+    {
+      "team": "IPS",
+      "published": {
+        "champion_pct": 0.035,
+        "top7_pct": 3.648,
+        "relegation_pct": 46.965,
+        "avg_points": 41.887
+      },
+      "replay": {
+        "champion_pct": 0.04,
+        "top7_pct": 3.591,
+        "relegation_pct": 47.022,
+        "avg_points": 41.889
+      },
+      "delta": {
+        "champion_pp": 0.005,
+        "top7_pp": -0.057,
+        "relegation_pp": 0.057,
+        "avg_points": 0.002
+      }
+    },
+    {
+      "team": "AVL",
+      "published": {
+        "champion_pct": 6.251,
+        "top7_pct": 58.724,
+        "relegation_pct": 1.887,
+        "avg_points": 57.871
+      },
+      "replay": {
+        "champion_pct": 6.206,
+        "top7_pct": 58.674,
+        "relegation_pct": 1.968,
+        "avg_points": 57.87
+      },
+      "delta": {
+        "champion_pp": -0.045,
+        "top7_pp": -0.05,
+        "relegation_pp": 0.081,
+        "avg_points": -0.001
+      }
+    },
+    {
+      "team": "FUL",
+      "published": {
+        "champion_pct": 1.102,
+        "top7_pct": 27.037,
+        "relegation_pct": 10.002,
+        "avg_points": 51.288
+      },
+      "replay": {
+        "champion_pct": 1.137,
+        "top7_pct": 27.079,
+        "relegation_pct": 9.968,
+        "avg_points": 51.292
+      },
+      "delta": {
+        "champion_pp": 0.035,
+        "top7_pp": 0.042,
+        "relegation_pp": -0.034,
+        "avg_points": 0.004
+      }
+    },
+    {
+      "team": "LFC",
+      "published": {
+        "champion_pct": 4.111,
+        "top7_pct": 50.319,
+        "relegation_pct": 3.101,
+        "avg_points": 56.173
+      },
+      "replay": {
+        "champion_pct": 4.133,
+        "top7_pct": 50.288,
+        "relegation_pct": 3.093,
+        "avg_points": 56.172
+      },
+      "delta": {
+        "champion_pp": 0.022,
+        "top7_pp": -0.031,
+        "relegation_pp": -0.008,
+        "avg_points": -0.001
+      }
+    },
+    {
+      "team": "NFO",
+      "published": {
+        "champion_pct": 0.359,
+        "top7_pct": 14.697,
+        "relegation_pct": 19.644,
+        "avg_points": 47.839
+      },
+      "replay": {
+        "champion_pct": 0.365,
+        "top7_pct": 14.723,
+        "relegation_pct": 19.641,
+        "avg_points": 47.841
+      },
+      "delta": {
+        "champion_pp": 0.006,
+        "top7_pp": 0.026,
+        "relegation_pp": -0.003,
+        "avg_points": 0.002
+      }
+    },
+    {
+      "team": "MUN",
+      "published": {
+        "champion_pct": 12.964,
+        "top7_pct": 75.099,
+        "relegation_pct": 0.626,
+        "avg_points": 61.459
+      },
+      "replay": {
+        "champion_pct": 13.049,
+        "top7_pct": 75.124,
+        "relegation_pct": 0.591,
+        "avg_points": 61.465
+      },
+      "delta": {
+        "champion_pp": 0.085,
+        "top7_pp": 0.025,
+        "relegation_pp": -0.035,
+        "avg_points": 0.006
+      }
+    },
+    {
+      "team": "HUL",
+      "published": {
+        "champion_pct": 0.006,
+        "top7_pct": 0.889,
+        "relegation_pct": 70.078,
+        "avg_points": 37.509
+      },
+      "replay": {
+        "champion_pct": 0.005,
+        "top7_pct": 0.869,
+        "relegation_pct": 69.952,
+        "avg_points": 37.511
+      },
+      "delta": {
+        "champion_pp": -0.001,
+        "top7_pp": -0.02,
+        "relegation_pp": -0.126,
+        "avg_points": 0.002
+      }
+    },
+    {
+      "team": "MCI",
+      "published": {
+        "champion_pct": 22.55,
+        "top7_pct": 85.223,
+        "relegation_pct": 0.227,
+        "avg_points": 64.372
+      },
+      "replay": {
+        "champion_pct": 22.65,
+        "top7_pct": 85.203,
+        "relegation_pct": 0.253,
+        "avg_points": 64.371
+      },
+      "delta": {
+        "champion_pp": 0.1,
+        "top7_pp": -0.02,
+        "relegation_pp": 0.026,
+        "avg_points": -0.001
+      }
+    },
+    {
+      "team": "ARS",
+      "published": {
+        "champion_pct": 38.931,
+        "top7_pct": 92.6,
+        "relegation_pct": 0.06,
+        "avg_points": 67.623
+      },
+      "replay": {
+        "champion_pct": 38.756,
+        "top7_pct": 92.617,
+        "relegation_pct": 0.062,
+        "avg_points": 67.615
+      },
+      "delta": {
+        "champion_pp": -0.175,
+        "top7_pp": 0.017,
+        "relegation_pp": 0.002,
+        "avg_points": -0.008
+      }
+    },
+    {
+      "team": "CFC",
+      "published": {
+        "champion_pct": 1.658,
+        "top7_pct": 32.413,
+        "relegation_pct": 7.558,
+        "avg_points": 52.533
+      },
+      "replay": {
+        "champion_pct": 1.633,
+        "top7_pct": 32.403,
+        "relegation_pct": 7.601,
+        "avg_points": 52.526
+      },
+      "delta": {
+        "champion_pp": -0.025,
+        "top7_pp": -0.01,
+        "relegation_pp": 0.043,
+        "avg_points": -0.007
+      }
+    },
+    {
+      "team": "SUN",
+      "published": {
+        "champion_pct": 1.655,
+        "top7_pct": 33.211,
+        "relegation_pct": 7.304,
+        "avg_points": 52.699
+      },
+      "replay": {
+        "champion_pct": 1.647,
+        "top7_pct": 33.22,
+        "relegation_pct": 7.283,
+        "avg_points": 52.703
+      },
+      "delta": {
+        "champion_pp": -0.008,
+        "top7_pp": 0.009,
+        "relegation_pp": -0.021,
+        "avg_points": 0.004
+      }
+    },
+    {
+      "team": "CRY",
+      "published": {
+        "champion_pct": 0.453,
+        "top7_pct": 16.87,
+        "relegation_pct": 17.351,
+        "avg_points": 48.519
+      },
+      "replay": {
+        "champion_pct": 0.441,
+        "top7_pct": 16.869,
+        "relegation_pct": 17.409,
+        "avg_points": 48.515
+      },
+      "delta": {
+        "champion_pp": -0.012,
+        "top7_pp": -0.001,
+        "relegation_pp": 0.058,
+        "avg_points": -0.004
+      }
+    }
+  ]
+}
